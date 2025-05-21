@@ -1,0 +1,9 @@
+imitation_nav_node:
+  ros__parameters:
+    interval_ms: 100
+    model_name: model.pt
+    image_width: 640
+    image_height: 480
+    max_linear_vel: 0.5
+    max_angular_vel: 1.0
+    visualize_flag: true
