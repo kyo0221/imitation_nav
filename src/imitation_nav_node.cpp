@@ -1,4 +1,5 @@
 #include "imitation_nav/imitation_nav_node.hpp"
+#include <ament_index_cpp/get_package_share_directory.hpp>
 
 namespace imitation_nav
 {
@@ -6,11 +7,13 @@ namespace imitation_nav
 ImitationNav::ImitationNav(const rclcpp::NodeOptions &options) : ImitationNav("", options) {}
 
 ImitationNav::ImitationNav(const std::string &name_space, const rclcpp::NodeOptions &options)
-: rclcpp::Node("ImitationNav_node", name_space, options),
+: rclcpp::Node("imitation_nav_node", name_space, options),
 interval_ms(get_parameter("interval_ms").as_int()),
-model_name(get_parameter("model_name").as_int()),
+model_name(get_parameter("model_name").as_string()),
 linear_max_(get_parameter("max_linear_vel").as_double()),
 angular_max_(get_parameter("max_angular_vel").as_double()),
+image_width_(get_parameter("image_width").as_int()),
+image_height_(get_parameter("image_height").as_int()),
 visualize_flag_(get_parameter("visualize_flag").as_bool())
 {
     autonomous_flag_subscriber_ = this->create_subscription<std_msgs::msg::Bool>("/autonomous", 10, std::bind(&ImitationNav::autonomousFlagCallback, this, std::placeholders::_1));
@@ -82,3 +85,16 @@ void ImitationNav::ImitationNavigation()
 }
 
 }  // namespace imitation_nav
+
+int main(int argc, char **argv) {
+    rclcpp::init(argc, argv);
+
+    rclcpp::NodeOptions node_option;
+    node_option.allow_undeclared_parameters(true);
+    node_option.automatically_declare_parameters_from_overrides(true);
+
+    auto node = std::make_shared<imitation_nav::ImitationNav>(node_option);
+    rclcpp::spin(node);
+    rclcpp::shutdown();
+    return 0;
+  }

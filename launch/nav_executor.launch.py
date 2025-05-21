@@ -13,10 +13,11 @@ def generate_launch_description():
     )
 
     nav_node = Node(
-        package = 'imitation_nav',
-        executable = 'imitation_nav_node',
-        parameters = [config_file_path],
-        output = 'screen'
+        package='imitation_nav',
+        executable='imitation_nav_node',
+        name='imitation_nav_node',
+        parameters=[config_file_path],
+        output='screen'
     )
 
     return LaunchDescription([nav_node])

@@ -3,6 +3,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <geometry_msgs/msg/twist.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <torch/script.h>
 #include <cv_bridge/cv_bridge.h>
 #include <image_transport/image_transport.hpp>
@@ -40,9 +41,9 @@ private:
   const std::string model_name;
   const double linear_max_;
   const double angular_max_;
-  bool visualize_flag_;
   const int image_width_;
   const int image_height_;
+  bool visualize_flag_;
 
   std::string model_path_;
   bool autonomous_flag_;

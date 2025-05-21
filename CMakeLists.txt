@@ -5,8 +5,9 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-set(Torch_DIR "/opt/libtorch/share/cmake/Torch")
+set(Torch_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libtorch/share/cmake/Torch")
 find_package(Torch REQUIRED)
+find_package(OpenCV REQUIRED)
 
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
@@ -17,6 +18,12 @@ ament_auto_add_executable(imitation_nav_node
 
 target_link_libraries(imitation_nav_node
   ${TORCH_LIBRARIES}
+  ${OpenCV_LIBS}
+)
+
+target_include_directories(imitation_nav_node PRIVATE
+  ${TORCH_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
 )
 
 install(DIRECTORY
