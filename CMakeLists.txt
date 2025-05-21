@@ -5,48 +5,39 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-find_package(ament_cmake_auto REQUIRED)
-
-include_directories(${EIGEN3_INCLUDE_DIRS})
-
-ament_auto_find_build_dependencies()
-
-# Set Libtorch directory manually (change as needed)
 set(Torch_DIR "/opt/libtorch/share/cmake/Torch")
 find_package(Torch REQUIRED)
 
+find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
 
-include_directories(
-  ${OpenCV_INCLUDE_DIRS}
-  ${ament_index_cpp_INCLUDE_DIRS}
-)
-
-add_executable(imitation_nav
+ament_auto_add_executable(imitation_nav_node
   src/imitation_nav_node.cpp
 )
 
-# link dependencies
-target_link_libraries(imitation_nav
-  ${OpenCV_LIBRARIES}
+target_link_libraries(imitation_nav_node
   ${TORCH_LIBRARIES}
+)
+
+install(DIRECTORY
+  include/
+  DESTINATION include/
+)
+
+install(DIRECTORY
+  launch
+  config
+  weights
+  DESTINATION share/${PROJECT_NAME}
+)
+
+install(TARGETS imitation_nav_node
+  DESTINATION lib/${PROJECT_NAME}
 )
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
-  set(ament_cmake_copyright_FOUND TRUE)
-  set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-ament_export_dependencies(
-  ament_cmake_auto
-)
-
-target_link_libraries(${PROJECT_NAME}
-  # 他の依存ライブラリ
-)
-
-ament_auto_package(
-  INSTALL_TO_SHARE
-)
+ament_auto_package()
