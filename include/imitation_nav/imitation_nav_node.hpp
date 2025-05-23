@@ -4,6 +4,7 @@
 #include <sensor_msgs/msg/image.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <std_msgs/msg/string.hpp>
 #include <torch/script.h>
 #include <cv_bridge/cv_bridge.h>
 #include <image_transport/image_transport.hpp>
@@ -25,10 +26,13 @@ public:
 
 private:
   void autonomousFlagCallback(const std_msgs::msg::Bool::SharedPtr msg);
+  void RouteCommandCallback(const std_msgs::msg::String::SharedPtr msg);
   void ImageCallback(const sensor_msgs::msg::Image::SharedPtr msg);
+
   void ImitationNavigation();
 
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr autonomous_flag_subscriber_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr route_command_subscriber_;
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
   rclcpp::TimerBase::SharedPtr timer_;
@@ -46,6 +50,7 @@ private:
   bool visualize_flag_;
 
   std::string model_path_;
+  std::string current_route_command_;
   bool autonomous_flag_;
 };
 
