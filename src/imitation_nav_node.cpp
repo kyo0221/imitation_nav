@@ -27,6 +27,7 @@ visualize_flag_(get_parameter("visualize_flag").as_bool())
         std::string package_share = ament_index_cpp::get_package_share_directory("imitation_nav");
         model_path_ = package_share + "/weights/" + model_name;
         model_ = torch::jit::load(model_path_);
+        model_.to(torch::kCUDA);
         model_.eval();
         RCLCPP_INFO(this->get_logger(), "Model loaded from: %s", model_path_.c_str());
     } catch (const c10::Error &e) {
@@ -65,6 +66,7 @@ void ImitationNav::ImitationNavigation()
     resized.convertTo(resized, CV_32FC3, 1.0 / 255.0);
 
     at::Tensor input_tensor = torch::from_blob(resized.data, {1, image_height_, image_width_, 3}).permute({0, 3, 1, 2}).clone();
+    input_tensor = input_tensor.to(torch::kCUDA);
     at::Tensor output = model_.forward({input_tensor}).toTensor();
 
     double predicted_angular = output.item<float>();

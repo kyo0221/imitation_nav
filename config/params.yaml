@@ -1,9 +1,9 @@
 imitation_nav_node:
   ros__parameters:
     interval_ms: 100
-    model_name: model.pt
-    image_height: 48
-    image_width: 64
-    max_linear_vel: 0.5
+    model_name: svga.pt
+    image_height: 150
+    image_width: 240
+    max_linear_vel: 3.0
     max_angular_vel: 1.0
     visualize_flag: true
