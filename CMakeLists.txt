@@ -12,6 +12,9 @@ find_package(OpenCV REQUIRED)
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
 
+ament_auto_add_library(imitation_nav
+  src/template_matching.cpp
+)
 ament_auto_add_executable(imitation_nav_node
   src/imitation_nav_node.cpp
 )
@@ -19,6 +22,7 @@ ament_auto_add_executable(imitation_nav_node
 target_link_libraries(imitation_nav_node
   ${TORCH_LIBRARIES}
   ${OpenCV_LIBS}
+  yaml-cpp
 )
 
 target_include_directories(imitation_nav_node PRIVATE

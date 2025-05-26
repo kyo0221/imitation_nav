@@ -1,6 +1,5 @@
 #include "imitation_nav/imitation_nav_node.hpp"
 #include <ament_index_cpp/get_package_share_directory.hpp>
-#include <std_msgs/msg/string.hpp>  // For route command topic
 
 namespace imitation_nav
 {
@@ -15,14 +14,15 @@ linear_max_(get_parameter("max_linear_vel").as_double()),
 angular_max_(get_parameter("max_angular_vel").as_double()),
 image_width_(get_parameter("image_width").as_int()),
 image_height_(get_parameter("image_height").as_int()),
+threshold_(get_parameter("mathing_threshold").as_double()),
 visualize_flag_(get_parameter("visualize_flag").as_bool()),
-current_route_command_("straight")
+template_matcher_(
+    ament_index_cpp::get_package_share_directory("imitation_nav") + "/config/matching_images",
+    ament_index_cpp::get_package_share_directory("imitation_nav") + "/config/maps/map.yaml"
+)
 {
     autonomous_flag_subscriber_ = this->create_subscription<std_msgs::msg::Bool>(
         "/autonomous", 10, std::bind(&ImitationNav::autonomousFlagCallback, this, std::placeholders::_1));
-
-    route_command_subscriber_ = this->create_subscription<std_msgs::msg::String>(
-        "/cmd_route", 1, std::bind(&ImitationNav::RouteCommandCallback, this, std::placeholders::_1));
 
     image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
         "/image_raw", 10, std::bind(&ImitationNav::ImageCallback, this, std::placeholders::_1));
@@ -34,7 +34,8 @@ current_route_command_("straight")
 
     try {
         std::string package_share = ament_index_cpp::get_package_share_directory("imitation_nav");
-        model_path_ = package_share + "/weights/" + model_name;
+        std::string model_path_ = package_share + "/weights/" + model_name;
+
         model_ = torch::jit::load(model_path_);
         model_.to(torch::kCUDA);
         model_.eval();
@@ -49,16 +50,13 @@ void ImitationNav::autonomousFlagCallback(const std_msgs::msg::Bool::SharedPtr m
     autonomous_flag_ = msg->data;
 }
 
-void ImitationNav::RouteCommandCallback(const std_msgs::msg::String::SharedPtr msg)
-{
-    current_route_command_ = msg->data;
-}
-
 void ImitationNav::ImageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
     try {
         cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");
         latest_image_ = cv_ptr->image;
+
+        template_matcher_.matchAndAdvance(latest_image_, threshold_);
     } catch (const cv_bridge::Exception &e) {
         RCLCPP_ERROR(this->get_logger(), "cv_bridge exception: %s", e.what());
     }
@@ -78,15 +76,24 @@ void ImitationNav::ImitationNavigation()
         cv::resize(latest_image_, resized, cv::Size(image_width_, image_height_));
         resized.convertTo(resized, CV_32FC3, 1.0 / 255.0);
 
-        at::Tensor image_tensor = torch::from_blob(resized.data, {1, image_height_, image_width_, 3}).permute({0, 3, 1, 2}).clone().to(torch::kCUDA);
+        at::Tensor image_tensor = torch::from_blob(resized.data, {1, image_height_, image_width_, 3})
+            .permute({0, 3, 1, 2})
+            .clone()
+            .to(torch::kCUDA);
 
+        std::string action = template_matcher_.getCurrentAction();
         int command_idx = 0;
-        if (current_route_command_ == "straight") command_idx = 0;
-        else if (current_route_command_ == "left") command_idx = 1;
-        else if (current_route_command_ == "right") command_idx = 2;
-        else RCLCPP_WARN(this->get_logger(), "Unknown route command: %s", current_route_command_.c_str());
 
-        at::Tensor cmd_tensor = torch::tensor({command_idx}, torch::dtype(torch::kLong)).to(torch::kCUDA);
+        if (action == "straight") command_idx = 0;
+        else if (action == "left") command_idx = 1;
+        else if (action == "right") command_idx = 2;
+        else {
+            RCLCPP_WARN(this->get_logger(), "Unknown matched action: %s. Defaulting to 'straight'", action.c_str());
+            command_idx = 0;
+        }
+
+        at::Tensor cmd_tensor = torch::zeros({1, 3}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
+        cmd_tensor[0][command_idx] = 1.0;
 
         at::Tensor output = model_.forward({image_tensor, cmd_tensor}).toTensor();
         double predicted_angular = output.item<float>();

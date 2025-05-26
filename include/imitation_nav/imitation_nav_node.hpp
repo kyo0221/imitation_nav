@@ -10,6 +10,8 @@
 #include <image_transport/image_transport.hpp>
 #include <opencv2/opencv.hpp>
 
+#include <imitation_nav/template_matching.hpp>
+
 #include <imitation_nav/visibility_control.h>
 
 namespace imitation_nav
@@ -47,11 +49,15 @@ private:
   const double angular_max_;
   const int image_width_;
   const int image_height_;
+  const double threshold_;
   bool visualize_flag_;
 
-  std::string model_path_;
+  // std::string model_path_;
   std::string current_route_command_;
-  bool autonomous_flag_;
+  bool autonomous_flag_=false;
+  bool matching_flag_=false;
+
+  imitation_nav::TemplateMatcher template_matcher_;
 };
 
 }  // namespace imitation_nav

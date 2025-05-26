@@ -1,9 +1,10 @@
 imitation_nav_node:
   ros__parameters:
     interval_ms: 100
-    model_name: svga.pt
-    image_height: 150
-    image_width: 240
-    max_linear_vel: 3.0
+    model_name: train_boja.pt
+    image_height: 88
+    image_width: 200
+    max_linear_vel: 2.0
     max_angular_vel: 1.0
+    mathing_threshold: 0.8 # 0~1.0
     visualize_flag: true
