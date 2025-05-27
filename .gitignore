@@ -1,2 +1,4 @@
 libtorch/
 weights/
+config/matching_images/
+config/maps

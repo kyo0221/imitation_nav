@@ -54,9 +54,12 @@ void ImitationNav::ImageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
     try {
         cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");
-        latest_image_ = cv_ptr->image;
+        cv::Mat input_image = cv_ptr->image;
 
+        cv::resize(input_image, latest_image_, cv::Size(image_width_, image_height_));
         template_matcher_.matchAndAdvance(latest_image_, threshold_);
+        latest_image_.convertTo(latest_image_, CV_32FC3, 1.0 / 255.0);
+    
     } catch (const cv_bridge::Exception &e) {
         RCLCPP_ERROR(this->get_logger(), "cv_bridge exception: %s", e.what());
     }
@@ -64,24 +67,16 @@ void ImitationNav::ImageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 
 void ImitationNav::ImitationNavigation()
 {
-    if (!autonomous_flag_) return;
-
-    if (latest_image_.empty()) {
-        RCLCPP_WARN(this->get_logger(), "No image received yet");
-        return;
-    }
+    if (!autonomous_flag_ || latest_image_.empty()) return;
 
     try {
-        cv::Mat resized;
-        cv::resize(latest_image_, resized, cv::Size(image_width_, image_height_));
-        resized.convertTo(resized, CV_32FC3, 1.0 / 255.0);
-
-        at::Tensor image_tensor = torch::from_blob(resized.data, {1, image_height_, image_width_, 3})
+        at::Tensor image_tensor = torch::from_blob(latest_image_.data, {1, image_height_, image_width_, 3})
             .permute({0, 3, 1, 2})
             .clone()
             .to(torch::kCUDA);
 
         std::string action = template_matcher_.getCurrentAction();
+        std::cerr << "current action :" << action << std::endl;
         int command_idx = 0;
 
         if (action == "straight") command_idx = 0;
@@ -104,10 +99,10 @@ void ImitationNav::ImitationNavigation()
         cmd_msg.angular.z = predicted_angular;
         cmd_pub_->publish(cmd_msg);
 
-        if (visualize_flag_) {
-            cv::imshow("Input Image", resized);
-            cv::waitKey(1);
-        }
+        // if (visualize_flag_) {
+        //     cv::imshow("Input Image", resized);
+        //     cv::waitKey(1);
+        // }
     } catch (const c10::Error &e) {
         RCLCPP_ERROR(this->get_logger(), "TorchScript inference error: %s", e.what());
     }

@@ -76,11 +76,13 @@ void TemplateMatcher::matchAndAdvance(const cv::Mat& input_img, double threshold
 {
     if (current_index_ >= templates_.size() || current_index_ >= map_actions_.size()) {
         std::cerr << "[Matcher] No more templates or map actions to process." << std::endl;
+        return;
     }
 
     const cv::Mat& tmpl = templates_[current_index_];
     if (input_img.cols < tmpl.cols || input_img.rows < tmpl.rows) {
         std::cerr << "[Matcher] Input image smaller than template." << std::endl;
+        return;
     }
 
     cv::Mat result;
@@ -88,9 +90,11 @@ void TemplateMatcher::matchAndAdvance(const cv::Mat& input_img, double threshold
     double min_val, max_val;
     cv::minMaxLoc(result, &min_val, &max_val);
 
-    std::cerr << "🧩 Matching (ID=" << map_actions_[current_index_].first
-              << ", action=" << map_actions_[current_index_].second
-              << "): score=" << max_val << std::endl;
+    cv::imshow("Input Image", input_img);
+    cv::waitKey(1);
+
+    cv::imshow("Temp Image", tmpl);
+    cv::waitKey(1);
 
     if (max_val >= threshold) {
         last_action_ = map_actions_[current_index_].second;

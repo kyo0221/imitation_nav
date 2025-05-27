@@ -1,22 +1,73 @@
 map_list:
 - edge:
     ID: 0
-    action: straight
-- edge:
-    ID: 1
     action: left
 - edge:
-    ID: 2
+    ID: 1
     action: straight
+- edge:
+    ID: 2
+    action: left
 - edge:
     ID: 3
     action: straight
 - edge:
     ID: 4
-    action: straight
+    action: right
 - edge:
     ID: 5
-    action: left
+    action: straight
 - edge:
     ID: 6
+    action: right
+- edge:
+    ID: 7
+    action: straight
+- edge:
+    ID: 8
+    action: right
+- edge:
+    ID: 9
+    action: straight
+- edge:
+    ID: 10
+    action: right
+- edge:
+    ID: 11
+    action: straight
+- edge:
+    ID: 12
+    action: right
+- edge:
+    ID: 13
+    action: straight
+- edge:
+    ID: 14
+    action: right
+- edge:
+    ID: 15
+    action: straight
+- edge:
+    ID: 16
+    action: left
+- edge:
+    ID: 17
+    action: straight
+- edge:
+    ID: 18
+    action: left
+- edge:
+    ID: 19
+    action: straight
+- edge:
+    ID: 20
+    action: right
+- edge:
+    ID: 21
+    action: straight
+- edge:
+    ID: 22
+    action: right
+- edge:
+    ID: 23
     action: straight
