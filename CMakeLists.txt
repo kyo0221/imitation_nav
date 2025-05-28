@@ -13,8 +13,20 @@ find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
 
 ament_auto_add_library(imitation_nav
-  src/template_matching.cpp
+  src/topo_localizer.cpp
 )
+
+target_link_libraries(imitation_nav
+  ${TORCH_LIBRARIES}
+  ${OpenCV_LIBS}
+  yaml-cpp
+)
+
+target_include_directories(imitation_nav PRIVATE
+  ${TORCH_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
+)
+
 ament_auto_add_executable(imitation_nav_node
   src/imitation_nav_node.cpp
 )

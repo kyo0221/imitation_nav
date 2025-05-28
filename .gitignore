@@ -1,4 +1,6 @@
+.vscode/
 libtorch/
-weights/
+weights/placenet/
+weights/*.pt
 config/matching_images/
 config/maps

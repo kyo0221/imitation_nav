@@ -5,12 +5,13 @@
 #include <geometry_msgs/msg/twist.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <torch/torch.h>
 #include <torch/script.h>
 #include <cv_bridge/cv_bridge.h>
 #include <image_transport/image_transport.hpp>
 #include <opencv2/opencv.hpp>
 
-#include <imitation_nav/template_matching.hpp>
+#include <imitation_nav/topo_localizer.hpp>
 
 #include <imitation_nav/visibility_control.h>
 
@@ -37,6 +38,7 @@ private:
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr route_command_subscriber_;
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
+
   rclcpp::TimerBase::SharedPtr timer_;
 
   torch::jit::script::Module model_;
@@ -44,20 +46,17 @@ private:
   cv::Mat latest_image_;
 
   const int interval_ms;
+  const int localization_interval_ms;
   const std::string model_name;
   const double linear_max_;
   const double angular_max_;
   const int image_width_;
   const int image_height_;
-  const double threshold_;
   bool visualize_flag_;
 
-  // std::string model_path_;
-  std::string current_route_command_;
   bool autonomous_flag_=false;
-  bool matching_flag_=false;
 
-  imitation_nav::TemplateMatcher template_matcher_;
+  imitation_nav::TopoLocalizer topo_localizer_;
 };
 
 }  // namespace imitation_nav

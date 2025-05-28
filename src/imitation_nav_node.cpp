@@ -1,5 +1,7 @@
 #include "imitation_nav/imitation_nav_node.hpp"
+
 #include <ament_index_cpp/get_package_share_directory.hpp>
+
 
 namespace imitation_nav
 {
@@ -9,16 +11,16 @@ ImitationNav::ImitationNav(const rclcpp::NodeOptions &options) : ImitationNav(""
 ImitationNav::ImitationNav(const std::string &name_space, const rclcpp::NodeOptions &options)
 : rclcpp::Node("imitation_nav_node", name_space, options),
 interval_ms(get_parameter("interval_ms").as_int()),
+localization_interval_ms(get_parameter("localization_interval_ms").as_int()),
 model_name(get_parameter("model_name").as_string()),
 linear_max_(get_parameter("max_linear_vel").as_double()),
 angular_max_(get_parameter("max_angular_vel").as_double()),
 image_width_(get_parameter("image_width").as_int()),
 image_height_(get_parameter("image_height").as_int()),
-threshold_(get_parameter("mathing_threshold").as_double()),
 visualize_flag_(get_parameter("visualize_flag").as_bool()),
-template_matcher_(
-    ament_index_cpp::get_package_share_directory("imitation_nav") + "/config/matching_images",
-    ament_index_cpp::get_package_share_directory("imitation_nav") + "/config/maps/map.yaml"
+topo_localizer_(
+    ament_index_cpp::get_package_share_directory("imitation_nav") + "/config/topo_map/topomap.yaml",
+    ament_index_cpp::get_package_share_directory("imitation_nav") + "/weights/placenet/placenet.pt"
 )
 {
     autonomous_flag_subscriber_ = this->create_subscription<std_msgs::msg::Bool>(
@@ -54,12 +56,7 @@ void ImitationNav::ImageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
     try {
         cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");
-        cv::Mat input_image = cv_ptr->image;
-
-        cv::resize(input_image, latest_image_, cv::Size(image_width_, image_height_));
-        template_matcher_.matchAndAdvance(latest_image_, threshold_);
-        latest_image_.convertTo(latest_image_, CV_32FC3, 1.0 / 255.0);
-    
+        latest_image_ = cv_ptr->image.clone();
     } catch (const cv_bridge::Exception &e) {
         RCLCPP_ERROR(this->get_logger(), "cv_bridge exception: %s", e.what());
     }
@@ -70,14 +67,12 @@ void ImitationNav::ImitationNavigation()
     if (!autonomous_flag_ || latest_image_.empty()) return;
 
     try {
-        at::Tensor image_tensor = torch::from_blob(latest_image_.data, {1, image_height_, image_width_, 3})
-            .permute({0, 3, 1, 2})
-            .clone()
-            .to(torch::kCUDA);
+        int node_id_ = topo_localizer_.inferNode(latest_image_);
 
-        std::string action = template_matcher_.getCurrentAction();
-        std::cerr << "current action :" << action << std::endl;
+        std::string action = topo_localizer_.getNodeAction(node_id_);
         int command_idx = 0;
+
+        RCLCPP_INFO(this->get_logger(), "current node id : %d, action command : %s", node_id_, action.c_str());
 
         if (action == "straight") command_idx = 0;
         else if (action == "left") command_idx = 1;
@@ -86,6 +81,14 @@ void ImitationNav::ImitationNavigation()
             RCLCPP_WARN(this->get_logger(), "Unknown matched action: %s. Defaulting to 'straight'", action.c_str());
             command_idx = 0;
         }
+
+        cv::Mat resized;
+        cv::resize(latest_image_, resized, cv::Size(image_width_, image_height_));
+        resized.convertTo(resized, CV_32FC3, 1.0 / 255.0);
+        at::Tensor image_tensor = torch::from_blob(resized.data, {1, image_height_, image_width_, 3})
+            .permute({0, 3, 1, 2})
+            .clone()
+            .to(torch::kCUDA);
 
         at::Tensor cmd_tensor = torch::zeros({1, 3}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
         cmd_tensor[0][command_idx] = 1.0;
@@ -99,10 +102,6 @@ void ImitationNav::ImitationNavigation()
         cmd_msg.angular.z = predicted_angular;
         cmd_pub_->publish(cmd_msg);
 
-        // if (visualize_flag_) {
-        //     cv::imshow("Input Image", resized);
-        //     cv::waitKey(1);
-        // }
     } catch (const c10::Error &e) {
         RCLCPP_ERROR(this->get_logger(), "TorchScript inference error: %s", e.what());
     }
