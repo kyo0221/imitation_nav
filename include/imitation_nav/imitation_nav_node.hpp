@@ -55,6 +55,9 @@ private:
   bool visualize_flag_;
 
   bool autonomous_flag_=false;
+  bool init_flag_=true;
+
+  std::vector<float> transition_ = {0.0f, 0.2f, 0.8f}; 
 
   imitation_nav::TopoLocalizer topo_localizer_;
 };

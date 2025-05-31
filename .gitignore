@@ -2,5 +2,4 @@
 libtorch/
 weights/placenet/
 weights/*.pt
-config/matching_images/
-config/maps
+config/

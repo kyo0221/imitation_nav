@@ -2,9 +2,9 @@ imitation_nav_node:
   ros__parameters:
     interval_ms: 100
     localization_interval_ms: 500
-    model_name: model_fuctory.pt
+    model_name: model_gamma_2-3.pt
     image_height: 88
     image_width: 200
-    max_linear_vel: 1.0
+    max_linear_vel: 0.4
     max_angular_vel: 1.57
-    visualize_flag: true
+    visualize_flag: false

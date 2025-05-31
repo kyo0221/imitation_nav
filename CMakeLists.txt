@@ -32,6 +32,7 @@ ament_auto_add_executable(imitation_nav_node
 )
 
 target_link_libraries(imitation_nav_node
+  imitation_nav
   ${TORCH_LIBRARIES}
   ${OpenCV_LIBS}
   yaml-cpp
@@ -54,7 +55,9 @@ install(DIRECTORY
   DESTINATION share/${PROJECT_NAME}
 )
 
-install(TARGETS imitation_nav_node
+install(TARGETS 
+  imitation_nav
+  imitation_nav_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

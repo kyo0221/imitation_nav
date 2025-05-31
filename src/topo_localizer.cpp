@@ -16,6 +16,38 @@ TopoLocalizer::TopoLocalizer(const std::string& map_path, const std::string& mod
     loadMap(map_path);
 }
 
+void TopoLocalizer::initializeModel(const cv::Mat& image) {
+    torch::Tensor query_feature = extractFeature(image);
+
+    std::vector<float> dists;
+    for (const auto& node : map_) {
+        auto ref_tensor = torch::from_blob((void*)node.feature.data(), {static_cast<long>(node.feature.size())}, torch::kFloat32);
+        float dist = std::sqrt(2.0f - 2.0f * torch::dot(query_feature, ref_tensor).item<float>());
+        dists.push_back(dist);
+    }
+
+    // 分位点（2.5%と97.5%）を計算
+    std::vector<float> sorted_dists = dists;
+    std::sort(sorted_dists.begin(), sorted_dists.end());
+    float q025 = sorted_dists[static_cast<size_t>(0.025 * sorted_dists.size())];
+    float q975 = sorted_dists[static_cast<size_t>(0.975 * sorted_dists.size())];
+
+    lambda1_ = std::log(delta_) / (q975 - q025);
+
+    belief_.resize(dists.size());
+    float sum = 0.0f;
+    for (size_t i = 0; i < dists.size(); ++i) {
+        belief_[i] = std::exp(-lambda1_ * dists[i]);
+        sum += belief_[i];
+    }
+    if (sum > 1e-6) {
+        for (float& b : belief_) {
+            b /= sum;
+        }
+    }
+}
+
+
 void TopoLocalizer::loadMap(const std::string& map_path) {
     YAML::Node root = YAML::LoadFile(map_path);
     for (const auto& node : root["nodes"]) {
@@ -53,21 +85,59 @@ torch::Tensor TopoLocalizer::extractFeature(const cv::Mat& image) {
 
 int TopoLocalizer::inferNode(const cv::Mat& input_image) {
     auto query_feature = extractFeature(input_image);
-    int best_idx = -1;
-    float best_dist = std::numeric_limits<float>::max();
+    std::vector<float> query_vec(query_feature.data_ptr<float>(), query_feature.data_ptr<float>() + query_feature.size(0));
 
+    std::vector<float> obs_lhood(map_.size(), 0.0f);
     for (size_t i = 0; i < map_.size(); ++i) {
         const auto& feat = map_[i].feature;
-        auto ref_tensor = torch::from_blob((void*)feat.data(), {static_cast<long>(feat.size())}, torch::kFloat32);
-        float dist = torch::nn::functional::pairwise_distance(query_feature, ref_tensor).item<float>();
-        if (dist < best_dist) {
-            best_dist = dist;
-            best_idx = static_cast<int>(i);
+        float dot = std::inner_product(feat.begin(), feat.end(), query_vec.begin(), 0.0f);
+        float dist = std::sqrt(std::max(0.0f, 2.0f - 2.0f * dot));
+        obs_lhood[i] = std::exp(-lambda1_ * dist);
+    }
+
+    const int w_size = static_cast<int>(transition_.size());
+    std::vector<float> padded_belief;
+    padded_belief.reserve(belief_.size() + 2 * (w_size - 1));
+
+    for (int i = w_size - 1; i > 0; --i)
+        padded_belief.push_back(belief_[i]);
+    padded_belief.insert(padded_belief.end(), belief_.begin(), belief_.end());
+    for (int i = belief_.size() - 2; i >= static_cast<int>(belief_.size()) - w_size + 1; --i)
+        padded_belief.push_back(belief_[i]);
+
+    std::vector<float> conv_result(belief_.size(), 0.0f);
+    for (size_t i = 0; i < belief_.size(); ++i) {
+        for (size_t j = 0; j < transition_.size(); ++j) {
+            conv_result[i] += padded_belief[i + j] * transition_[j];
         }
+    }
+
+    for (size_t i = 0; i < belief_.size(); ++i) {
+        belief_[i] = conv_result[i] * obs_lhood[i];
+    }
+
+    // 正規化
+    float sum = std::accumulate(belief_.begin(), belief_.end(), 0.0f);
+    if (sum > 1e-6f) {
+        for (float& b : belief_) {
+            b /= sum;
+        }
+    }
+
+    auto max_iter = std::max_element(belief_.begin(), belief_.end());
+    int best_idx = std::distance(belief_.begin(), max_iter);
+
+    std::cout << "[TopoLocalizer] Current belief distribution:" << std::endl;
+    for (size_t i = 0; i < belief_.size(); ++i) {
+        std::cout << "  Node ID: " << map_[i].id
+                << ", Belief: " << belief_[i]
+                << ", ObsLhood: " << obs_lhood[i]
+                << std::endl;
     }
 
     return map_[best_idx].id;
 }
+
 
 std::string TopoLocalizer::getNodeAction(int node_id) const {
     for (const auto& node : map_) {

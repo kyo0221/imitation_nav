@@ -57,6 +57,12 @@ void ImitationNav::ImageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
     try {
         cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");
         latest_image_ = cv_ptr->image.clone();
+
+        if(init_flag_ && autonomous_flag_){
+            topo_localizer_.initializeModel(latest_image_);
+            RCLCPP_INFO(this->get_logger(), "initialize model");
+            init_flag_=false;
+        }
     } catch (const cv_bridge::Exception &e) {
         RCLCPP_ERROR(this->get_logger(), "cv_bridge exception: %s", e.what());
     }
@@ -64,7 +70,7 @@ void ImitationNav::ImageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 
 void ImitationNav::ImitationNavigation()
 {
-    if (!autonomous_flag_ || latest_image_.empty()) return;
+    if (!autonomous_flag_ || init_flag_ || latest_image_.empty()) return;
 
     try {
         int node_id_ = topo_localizer_.inferNode(latest_image_);
