@@ -1,5 +1,5 @@
 .vscode/
 libtorch/
-weights/placenet/
+weights/
 weights/*.pt
 config/

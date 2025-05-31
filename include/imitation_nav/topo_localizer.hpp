@@ -23,6 +23,7 @@ public:
     TopoLocalizer(const std::string& map_path, const std::string& model_path);
     int inferNode(const cv::Mat& input_image);
     void initializeModel(const cv::Mat& image);
+    void setTransitionWindow(int window_lower, int window_upper);
 
     std::string getNodeAction(int node_id) const;
 
@@ -37,6 +38,9 @@ private:
     std::vector<float> belief_;     // 各ノードへの確率（正規化済み）
     float lambda1_ = 0.0f;
     float delta_ = 5.0f;
+    int window_lower_;
+    int window_upper_;
+    
     std::vector<float> transition_;
 
 

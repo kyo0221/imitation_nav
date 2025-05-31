@@ -52,13 +52,13 @@ private:
   const double angular_max_;
   const int image_width_;
   const int image_height_;
-  bool visualize_flag_;
+  const bool visualize_flag_;
+  const int window_lower_;
+  const int window_upper_;
 
   bool autonomous_flag_=false;
   bool init_flag_=true;
-
-  std::vector<float> transition_ = {0.0f, 0.2f, 0.8f}; 
-
+  
   imitation_nav::TopoLocalizer topo_localizer_;
 };
 

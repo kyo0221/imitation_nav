@@ -47,6 +47,14 @@ void TopoLocalizer::initializeModel(const cv::Mat& image) {
     }
 }
 
+void TopoLocalizer::setTransitionWindow(int window_lower, int window_upper) {
+    window_lower_ = window_lower;
+    window_upper_ = window_upper;
+    int window_size = window_upper_ - window_lower_;
+    transition_.assign(window_size, 1.0f);  // 一様分布で初期化
+    float sum = static_cast<float>(window_size);
+    for (float& v : transition_) v /= sum;
+}
 
 void TopoLocalizer::loadMap(const std::string& map_path) {
     YAML::Node root = YAML::LoadFile(map_path);
@@ -127,13 +135,28 @@ int TopoLocalizer::inferNode(const cv::Mat& input_image) {
     auto max_iter = std::max_element(belief_.begin(), belief_.end());
     int best_idx = std::distance(belief_.begin(), max_iter);
 
-    std::cout << "[TopoLocalizer] Current belief distribution:" << std::endl;
-    for (size_t i = 0; i < belief_.size(); ++i) {
-        std::cout << "  Node ID: " << map_[i].id
-                << ", Belief: " << belief_[i]
-                << ", ObsLhood: " << obs_lhood[i]
+
+    std::vector<std::pair<size_t, float>> indexed_belief;
+    for (size_t i = 0; i < obs_lhood.size(); ++i) {
+        indexed_belief.emplace_back(i, obs_lhood[i]);
+    }
+
+    std::sort(indexed_belief.begin(), indexed_belief.end(),
+            [](const auto& a, const auto& b) {
+                return a.second > b.second;
+            });
+
+    std::cout << "[TopoLocalizer] Top 5 belief nodes:" << std::endl;
+    for (size_t i = 0; i < std::min(size_t(5), indexed_belief.size()); ++i) {
+        size_t idx = indexed_belief[i].first;
+        std::cout << "  Rank " << (i + 1)
+                << ": Node ID = " << map_[idx].id
+                << ", Belief = " << belief_[idx]
+                << ", ObsLhood = " << obs_lhood[idx]
                 << std::endl;
     }
+
+    std::cout << "best_idx : " << best_idx << std::endl;
 
     return map_[best_idx].id;
 }
