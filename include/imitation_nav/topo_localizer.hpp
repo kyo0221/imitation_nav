@@ -20,7 +20,7 @@ struct TopoNode {
 
 class TopoLocalizer {
 public:
-    TopoLocalizer(const std::string& map_path, const std::string& model_path);
+    TopoLocalizer(const std::string& map_path, const std::string& model_path, const std::string& image_dir);
     int inferNode(const cv::Mat& input_image);
     void initializeModel(const cv::Mat& image);
     void setTransitionWindow(int window_lower, int window_upper);
@@ -35,14 +35,16 @@ private:
     torch::Tensor extractFeature(const cv::Mat& image);
     void loadMap(const std::string& map_path);
 
-    std::vector<float> belief_;     // 各ノードへの確率（正規化済み）
-    float lambda1_ = 0.0f;
+    std::vector<float> belief_;
+    float lambda1_;
     float delta_ = 5.0f;
     int window_lower_;
     int window_upper_;
+
+    int prev_best_idx_;
     
     std::vector<float> transition_;
-
+    std::string image_path_;
 
     torch::Tensor last_feature_;
 };

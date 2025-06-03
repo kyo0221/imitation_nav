@@ -7,9 +7,10 @@
 namespace imitation_nav
 {
 
-TopoLocalizer::TopoLocalizer(const std::string& map_path, const std::string& model_path)
+TopoLocalizer::TopoLocalizer(const std::string& map_path, const std::string& model_path, const std::string& image_dir)
     : device_(torch::cuda::is_available() ? torch::kCUDA : torch::kCPU)
 {
+    image_path_ = image_dir;
     model_ = torch::jit::load(model_path);
     model_.to(device_);
     model_.eval();
@@ -120,11 +121,19 @@ int TopoLocalizer::inferNode(const cv::Mat& input_image) {
         }
     }
 
+    int idx_min = std::max(0, prev_best_idx_ + window_lower_);
+    int idx_max = std::min(static_cast<int>(belief_.size()), prev_best_idx_ + window_upper_);
+
+    for (size_t i = 0; i < belief_.size(); ++i) {
+        if (i < static_cast<size_t>(idx_min) || i >= static_cast<size_t>(idx_max)) {
+            conv_result[i] = 0.0f;
+        }
+    }
+
     for (size_t i = 0; i < belief_.size(); ++i) {
         belief_[i] = conv_result[i] * obs_lhood[i];
     }
 
-    // 正規化
     float sum = std::accumulate(belief_.begin(), belief_.end(), 0.0f);
     if (sum > 1e-6f) {
         for (float& b : belief_) {
@@ -156,7 +165,15 @@ int TopoLocalizer::inferNode(const cv::Mat& input_image) {
                 << std::endl;
     }
 
-    std::cout << "best_idx : " << best_idx << std::endl;
+    prev_best_idx_ = best_idx;
+
+    cv::Mat best_node_image = cv::imread(image_path_+map_[best_idx].image_path);
+    if (!best_node_image.empty()) {
+        cv::imshow("Predicted Node Image", best_node_image);
+        cv::waitKey(1);
+    } else {
+        std::cerr << "[TopoLocalizer] Failed to load image at: " << map_[best_idx].image_path << std::endl;
+    }
 
     return map_[best_idx].id;
 }

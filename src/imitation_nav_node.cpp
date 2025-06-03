@@ -22,7 +22,8 @@ window_lower_(get_parameter("window_lower").as_int()),
 window_upper_(get_parameter("window_upper").as_int()),
 topo_localizer_(
     ament_index_cpp::get_package_share_directory("imitation_nav") + "/config/topo_map/topomap.yaml",
-    ament_index_cpp::get_package_share_directory("imitation_nav") + "/weights/placenet/placenet.pt"
+    ament_index_cpp::get_package_share_directory("imitation_nav") + "/weights/placenet/placenet.pt",
+    ament_index_cpp::get_package_share_directory("imitation_nav") + "/config/topo_map/images/"
 )
 {
     autonomous_flag_subscriber_ = this->create_subscription<std_msgs::msg::Bool>(
