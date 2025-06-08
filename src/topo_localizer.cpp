@@ -160,13 +160,13 @@ void TopoLocalizer::loadMap(const std::string& map_path) {
 
 torch::Tensor TopoLocalizer::extractFeature(const cv::Mat& image) {
     cv::Mat resized;
-    cv::resize(image, resized, cv::Size(88, 88));
+    cv::resize(image, resized, cv::Size(85, 85));
     resized.convertTo(resized, CV_32FC3, 1.0 / 255.0);
 
     // メモリの連続性を保証
     resized = resized.clone();
     
-    auto input_tensor = torch::from_blob(resized.data, {1, 88, 88, 3}, torch::kFloat32)
+    auto input_tensor = torch::from_blob(resized.data, {1, 85, 85, 3}, torch::kFloat32)
                             .permute({0, 3, 1, 2})  // [N, C, H, W]
                             .clone()
                             .to(device_);
