@@ -61,25 +61,14 @@ void TopoLocalizer::initializeModel(const cv::Mat& image) {
 }
 
 void TopoLocalizer::initializeBelief(const std::vector<float>& distances) {
-    float sum = 0.0f;
-    const float sigma = 1.0f;  // ガウス分布の標準偏差（必要に応じて調整）
+    const size_t uniform_range = 5;
     
-    // 0を基準としたガウス分布で初期信念分布を設定
-    for (size_t i = 0; i < distances.size(); ++i) {
-        // ガウス分布: exp(-x^2 / (2*σ^2))
-        float gaussian_value = std::exp(-(distances[i] * distances[i]) / (2.0f * sigma * sigma));
-        belief_[i] = gaussian_value;
-        sum += belief_[i];
-    }
+    // 全ての信念値を0で初期化
+    std::fill(belief_.begin(), belief_.end(), 0.0f);
     
-    // 正規化
-    if (sum > 1e-8f) {
-        for (float& b : belief_) {
-            b /= sum;
-        }
-    } else {
-        float uniform_prob = 1.0f / belief_.size();
-        std::fill(belief_.begin(), belief_.end(), uniform_prob);
+    float uniform_prob = 1.0f / uniform_range;
+    for (size_t i = 0; i < std::min(uniform_range, belief_.size()); ++i) {
+        belief_[i] = uniform_prob;
     }
 }
 
