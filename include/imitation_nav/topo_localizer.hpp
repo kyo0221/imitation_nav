@@ -42,9 +42,9 @@ private:
     std::vector<float> computeObservationLikelihood(const torch::Tensor& query_feature);
     std::vector<float> applyTransitionModel();
     void updateBelief(const std::vector<float>& predicted_belief, const std::vector<float>& obs_likelihood);
-    void printTopBeliefs(int top_k) const;
     void displayPredictedNode(int best_idx) const;
     void displayBliefHist() const;
+    void displayObsHist(const std::vector<float>& obs_likelihood) const;
 
     std::vector<TopoNode> map_;
     std::vector<float> belief_;
