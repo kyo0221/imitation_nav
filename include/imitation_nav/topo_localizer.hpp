@@ -35,6 +35,7 @@ private:
     void loadMap(const std::string& map_path);
     torch::Tensor extractFeature(const cv::Mat& image);
     void initializeBelief(const std::vector<float>& distances);
+    void initializePlot();
     void setupGaussianTransition();
     float computeFeatureDistance(const torch::Tensor& feat1, const torch::Tensor& feat2);
     
@@ -43,6 +44,7 @@ private:
     void updateBelief(const std::vector<float>& predicted_belief, const std::vector<float>& obs_likelihood);
     void printTopBeliefs(int top_k) const;
     void displayPredictedNode(int best_idx) const;
+    void displayBliefHist() const;
 
     std::vector<TopoNode> map_;
     std::vector<float> belief_;
@@ -58,7 +60,7 @@ private:
     int window_lower_;
     int window_upper_;
     
-    bool is_initialized_;                // 初期化フラグ
+    bool is_initialized_;
 };
 
 } // namespace imitation_nav

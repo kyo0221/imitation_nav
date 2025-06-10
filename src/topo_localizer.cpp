@@ -62,10 +62,13 @@ void TopoLocalizer::initializeModel(const cv::Mat& image) {
 
 void TopoLocalizer::initializeBelief(const std::vector<float>& distances) {
     float sum = 0.0f;
+    const float sigma = 1.0f;  // ガウス分布の標準偏差（必要に応じて調整）
     
-    // 距離に基づく初期信念分布
+    // 0を基準としたガウス分布で初期信念分布を設定
     for (size_t i = 0; i < distances.size(); ++i) {
-        belief_[i] = std::exp(-lambda1_ * distances[i]);
+        // ガウス分布: exp(-x^2 / (2*σ^2))
+        float gaussian_value = std::exp(-(distances[i] * distances[i]) / (2.0f * sigma * sigma));
+        belief_[i] = gaussian_value;
         sum += belief_[i];
     }
     
@@ -75,7 +78,6 @@ void TopoLocalizer::initializeBelief(const std::vector<float>& distances) {
             b /= sum;
         }
     } else {
-        // フォールバック: 一様分布
         float uniform_prob = 1.0f / belief_.size();
         std::fill(belief_.begin(), belief_.end(), uniform_prob);
     }
@@ -208,6 +210,7 @@ int TopoLocalizer::inferNode(const cv::Mat& input_image) {
     
     // 結果画像の表示
     displayPredictedNode(best_idx);
+    displayBliefHist();
     
     return map_[best_idx].id;
 }
@@ -316,6 +319,151 @@ void TopoLocalizer::displayPredictedNode(int best_idx) const {
         std::cerr << "[TopoLocalizer] Failed to load image at: " 
                  << image_path_ + map_[best_idx].image_path << std::endl;
     }
+}
+
+void TopoLocalizer::displayBliefHist() const {
+    if (belief_.empty()) {
+        std::cerr << "[TopoLocalizer] No belief data to display" << std::endl;
+        return;
+    }
+    
+    // ヒストグラム画像のサイズとパラメータ
+    const int img_width = 1200;
+    const int img_height = 600;
+    const int margin = 80;
+    const int hist_width = img_width - 2 * margin;
+    const int hist_height = img_height - 2 * margin;
+    
+    // 白い背景の画像を作成
+    cv::Mat hist_img(img_height, img_width, CV_8UC3, cv::Scalar(255, 255, 255));
+    
+    // 最大信念値を取得（スケーリング用）
+    float max_belief = *std::max_element(belief_.begin(), belief_.end());
+    if (max_belief < 1e-8f) max_belief = 1.0f;
+    
+    // バーの幅を計算
+    int bar_width = hist_width / static_cast<int>(belief_.size());
+    if (bar_width < 1) bar_width = 1;
+    
+    // 最大信念値のインデックスを特定
+    auto max_iter = std::max_element(belief_.begin(), belief_.end());
+    int max_idx = std::distance(belief_.begin(), max_iter);
+    
+    // ヒストグラムのバーを描画
+    for (size_t i = 0; i < belief_.size(); ++i) {
+        // バーの高さを計算（信念値に比例）
+        int bar_height = static_cast<int>((belief_[i] / max_belief) * hist_height);
+        
+        // バーの位置を計算
+        int x = margin + static_cast<int>(i) * bar_width;
+        int y = margin + hist_height - bar_height;
+        
+        // バーの色を決定（最大値は赤、それ以外は青）
+        cv::Scalar bar_color = (static_cast<int>(i) == max_idx) ? 
+                              cv::Scalar(0, 0, 255) : cv::Scalar(255, 100, 100);
+        
+        // バーを描画
+        cv::rectangle(hist_img, 
+                     cv::Point(x, y), 
+                     cv::Point(x + bar_width - 1, margin + hist_height), 
+                     bar_color, 
+                     cv::FILLED);
+        
+        // バーの輪郭を描画
+        cv::rectangle(hist_img, 
+                     cv::Point(x, y), 
+                     cv::Point(x + bar_width - 1, margin + hist_height), 
+                     cv::Scalar(0, 0, 0), 
+                     1);
+    }
+    
+    // 軸とグリッドを描画
+    // X軸
+    cv::line(hist_img, 
+             cv::Point(margin, margin + hist_height), 
+             cv::Point(margin + hist_width, margin + hist_height), 
+             cv::Scalar(0, 0, 0), 2);
+    
+    // Y軸
+    cv::line(hist_img, 
+             cv::Point(margin, margin), 
+             cv::Point(margin, margin + hist_height), 
+             cv::Scalar(0, 0, 0), 2);
+    
+    // グリッドライン（Y軸方向）
+    for (int i = 1; i <= 10; ++i) {
+        int y = margin + (hist_height * i) / 10;
+        cv::line(hist_img, 
+                 cv::Point(margin, y), 
+                 cv::Point(margin + hist_width, y), 
+                 cv::Scalar(200, 200, 200), 1);
+    }
+    
+    // ラベルとテキストを追加
+    // タイトル
+    cv::putText(hist_img, "Belief Distribution - Topological Localization", 
+                cv::Point(margin, 30), 
+                cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 0), 2);
+    
+    cv::putText(hist_img, "Belief", 
+                cv::Point(10, margin + hist_height/2), 
+                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 0), 2);
+    
+    cv::putText(hist_img, "Node ID", 
+                cv::Point(margin + hist_width/2 - 40, img_height - 20), 
+                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 0), 2);
+    
+    for (int i = 0; i <= 10; ++i) {
+        float value = (max_belief * i) / 10.0f;
+        int y = margin + hist_height - (hist_height * i) / 10;
+        
+        std::string label = std::to_string(value);
+        label = label.substr(0, label.find('.') + 4);
+        
+        cv::putText(hist_img, label, 
+                    cv::Point(margin - 70, y + 5), 
+                    cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(0, 0, 0), 1);
+    }
+    
+    int label_interval = std::max(1, static_cast<int>(belief_.size()) / 20);
+    for (size_t i = 0; i < belief_.size(); i += label_interval) {
+        int x = margin + static_cast<int>(i) * bar_width + bar_width/2;
+        std::string node_id = std::to_string(map_[i].id);
+        
+        cv::putText(hist_img, node_id, 
+                    cv::Point(x - 10, margin + hist_height + 20), 
+                    cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(0, 0, 0), 1);
+    }
+    
+    // 統計情報を表示
+    float entropy = getBeliefEntropy();
+    std::string info_text = "Max Belief: " + std::to_string(max_belief).substr(0, 6) + 
+                           "  Entropy: " + std::to_string(entropy).substr(0, 6) + 
+                           "  Best Node: " + std::to_string(map_[max_idx].id);
+    
+    cv::putText(hist_img, info_text, 
+                cv::Point(margin, img_height - 40), 
+                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 0), 2);
+    
+    // 最大信念値のノードに注釈を追加
+    if (max_idx < static_cast<int>(belief_.size())) {
+        int max_x = margin + max_idx * bar_width + bar_width/2;
+        int max_y = margin + hist_height - static_cast<int>((belief_[max_idx] / max_belief) * hist_height);
+        
+        // 矢印を描画
+        cv::arrowedLine(hist_img, 
+                       cv::Point(max_x, max_y - 30), 
+                       cv::Point(max_x, max_y - 5), 
+                       cv::Scalar(0, 0, 255), 2);
+        
+        std::string max_text = "MAX: " + std::to_string(belief_[max_idx]).substr(0, 6);
+        cv::putText(hist_img, max_text, 
+                    cv::Point(max_x - 30, max_y - 35), 
+                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 2);
+    }
+    
+    cv::imshow("Belief Distribution Histogram", hist_img);
+    cv::waitKey(1);
 }
 
 std::string TopoLocalizer::getNodeAction(int node_id) const {
