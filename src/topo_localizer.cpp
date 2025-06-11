@@ -196,8 +196,7 @@ int TopoLocalizer::inferNode(const cv::Mat& input_image) {
     
     // 結果画像の表示
     displayPredictedNode(best_idx);
-    displayBliefHist();
-    displayObsHist(obs_likelihood);
+    displayCombinedHist(obs_likelihood);
     
     return map_[best_idx].id;
 }
@@ -287,25 +286,25 @@ void TopoLocalizer::displayPredictedNode(int best_idx) const {
     }
 }
 
-void TopoLocalizer::displayBliefHist() const {
-    if (belief_.empty()) {
-        std::cerr << "[TopoLocalizer] No belief data to display" << std::endl;
+void TopoLocalizer::displayCombinedHist(const std::vector<float>& obs_likelihood) const {
+    if (belief_.empty() || obs_likelihood.empty()) {
+        std::cerr << "[TopoLocalizer] No data to display" << std::endl;
         return;
     }
     
-    // ヒストグラム画像のサイズとパラメータ
+    // 画像サイズとパラメータ
     const int img_width = 1200;
-    const int img_height = 600;
+    const int img_height = 800;  // 高さを増やして2つのヒストグラムを収める
     const int margin = 80;
     const int hist_width = img_width - 2 * margin;
-    const int hist_height = img_height - 2 * margin;
+    const int hist_height = (img_height - 3 * margin) / 2;  // 各ヒストグラムの高さ
     
     // 白い背景の画像を作成
     cv::Mat hist_img(img_height, img_width, CV_8UC3, cv::Scalar(255, 255, 255));
     
-    // 最大信念値を取得（スケーリング用）
-    float max_belief = *std::max_element(belief_.begin(), belief_.end());
-    if (max_belief < 1e-8f) max_belief = 1.0f;
+    // 固定の最大値を設定
+    const float fixed_max_belief = 1.0f;      // 信念分布の最大値
+    const float fixed_max_likelihood = 1.0f;  // 観測尤度の最大値
     
     // バーの幅を計算
     int bar_width = hist_width / static_cast<int>(belief_.size());
@@ -315,14 +314,17 @@ void TopoLocalizer::displayBliefHist() const {
     auto max_iter = std::max_element(belief_.begin(), belief_.end());
     int max_idx = std::distance(belief_.begin(), max_iter);
     
-    // ヒストグラムのバーを描画
+    // ========== 上半分：信念分布のヒストグラム ==========
+    const int belief_y_offset = margin;
+    
+    // 信念分布のバーを描画
     for (size_t i = 0; i < belief_.size(); ++i) {
-        // バーの高さを計算（信念値に比例）
-        int bar_height = static_cast<int>((belief_[i] / max_belief) * hist_height);
+        // バーの高さを固定最大値で正規化
+        int bar_height = static_cast<int>((belief_[i] / fixed_max_belief) * hist_height);
         
         // バーの位置を計算
         int x = margin + static_cast<int>(i) * bar_width;
-        int y = margin + hist_height - bar_height;
+        int y = belief_y_offset + hist_height - bar_height;
         
         // バーの色を決定（最大値は赤、それ以外は青）
         cv::Scalar bar_color = (static_cast<int>(i) == max_idx) ? 
@@ -331,90 +333,172 @@ void TopoLocalizer::displayBliefHist() const {
         // バーを描画
         cv::rectangle(hist_img, 
                      cv::Point(x, y), 
-                     cv::Point(x + bar_width - 1, margin + hist_height), 
+                     cv::Point(x + bar_width - 1, belief_y_offset + hist_height), 
                      bar_color, 
                      cv::FILLED);
         
         // バーの輪郭を描画
         cv::rectangle(hist_img, 
                      cv::Point(x, y), 
-                     cv::Point(x + bar_width - 1, margin + hist_height), 
+                     cv::Point(x + bar_width - 1, belief_y_offset + hist_height), 
                      cv::Scalar(0, 0, 0), 
                      1);
     }
     
-    // 軸とグリッドを描画
+    // 信念分布の軸とグリッドを描画
     // X軸
     cv::line(hist_img, 
-             cv::Point(margin, margin + hist_height), 
-             cv::Point(margin + hist_width, margin + hist_height), 
+             cv::Point(margin, belief_y_offset + hist_height), 
+             cv::Point(margin + hist_width, belief_y_offset + hist_height), 
              cv::Scalar(0, 0, 0), 2);
     
     // Y軸
     cv::line(hist_img, 
-             cv::Point(margin, margin), 
-             cv::Point(margin, margin + hist_height), 
+             cv::Point(margin, belief_y_offset), 
+             cv::Point(margin, belief_y_offset + hist_height), 
              cv::Scalar(0, 0, 0), 2);
     
     // グリッドライン（Y軸方向）
     for (int i = 1; i <= 10; ++i) {
-        int y = margin + (hist_height * i) / 10;
+        int y = belief_y_offset + (hist_height * i) / 10;
         cv::line(hist_img, 
                  cv::Point(margin, y), 
                  cv::Point(margin + hist_width, y), 
                  cv::Scalar(200, 200, 200), 1);
     }
     
-    // ラベルとテキストを追加
-    // タイトル
-    cv::putText(hist_img, "Belief Distribution - Topological Localization", 
-                cv::Point(margin, 30), 
-                cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 0), 2);
+    // 信念分布のラベル
+    cv::putText(hist_img, "Belief Distribution", 
+                cv::Point(margin, belief_y_offset - 10), 
+                cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 0, 0), 2);
     
     cv::putText(hist_img, "Belief", 
-                cv::Point(10, margin + hist_height/2), 
-                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 0), 2);
+                cv::Point(10, belief_y_offset + hist_height/2), 
+                cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 0), 2);
     
+    // Y軸の目盛り（信念分布）
+    for (int i = 0; i <= 10; ++i) {
+        float value = (fixed_max_belief * i) / 10.0f;
+        int y = belief_y_offset + hist_height - (hist_height * i) / 10;
+        
+        std::string label = std::to_string(value);
+        label = label.substr(0, label.find('.') + 3);
+        
+        cv::putText(hist_img, label, 
+                    cv::Point(margin - 60, y + 5), 
+                    cv::FONT_HERSHEY_SIMPLEX, 0.35, cv::Scalar(0, 0, 0), 1);
+    }
+    
+    // ========== 下半分：観測尤度のヒストグラム ==========
+    const int likelihood_y_offset = belief_y_offset + hist_height + margin;
+    
+    // 観測尤度のバーを描画
+    for (size_t i = 0; i < obs_likelihood.size(); ++i) {
+        // バーの高さを固定最大値で正規化
+        int bar_height = static_cast<int>((obs_likelihood[i] / fixed_max_likelihood) * hist_height);
+        
+        int x = margin + static_cast<int>(i) * bar_width;
+        int y = likelihood_y_offset + hist_height - bar_height;
+        
+        // バーを描画（赤色）
+        cv::rectangle(hist_img,
+                     cv::Point(x, y),
+                     cv::Point(x + bar_width - 1, likelihood_y_offset + hist_height),
+                     cv::Scalar(0, 0, 255),
+                     cv::FILLED);
+        
+        // バーの輪郭
+        cv::rectangle(hist_img,
+                     cv::Point(x, y),
+                     cv::Point(x + bar_width - 1, likelihood_y_offset + hist_height),
+                     cv::Scalar(0, 0, 0),
+                     1);
+    }
+    
+    // 観測尤度の軸とグリッドを描画
+    // X軸
+    cv::line(hist_img, 
+             cv::Point(margin, likelihood_y_offset + hist_height), 
+             cv::Point(margin + hist_width, likelihood_y_offset + hist_height), 
+             cv::Scalar(0, 0, 0), 2);
+    
+    // Y軸
+    cv::line(hist_img, 
+             cv::Point(margin, likelihood_y_offset), 
+             cv::Point(margin, likelihood_y_offset + hist_height), 
+             cv::Scalar(0, 0, 0), 2);
+    
+    // グリッドライン
+    for (int i = 1; i <= 10; ++i) {
+        int y = likelihood_y_offset + (hist_height * i) / 10;
+        cv::line(hist_img,
+                 cv::Point(margin, y),
+                 cv::Point(margin + hist_width, y),
+                 cv::Scalar(220, 220, 220), 1);
+    }
+    
+    // 観測尤度のラベル
+    cv::putText(hist_img, "Observation Likelihood Distribution", 
+                cv::Point(margin, likelihood_y_offset - 10), 
+                cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 0, 0), 2);
+    
+    cv::putText(hist_img, "Likelihood", 
+                cv::Point(10, likelihood_y_offset + hist_height/2), 
+                cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 0), 2);
+    
+    // Y軸の目盛り（観測尤度）
+    for (int i = 0; i <= 10; ++i) {
+        float value = (fixed_max_likelihood * i) / 10.0f;
+        int y = likelihood_y_offset + hist_height - (hist_height * i) / 10;
+        
+        std::string label = std::to_string(value);
+        label = label.substr(0, label.find('.') + 3);
+        
+        cv::putText(hist_img, label, 
+                    cv::Point(margin - 60, y + 5), 
+                    cv::FONT_HERSHEY_SIMPLEX, 0.35, cv::Scalar(0, 0, 0), 1);
+    }
+    
+    // ========== 共通要素 ==========
+    // メインタイトル
+    cv::putText(hist_img, "Topological Localization - Combined View", 
+                cv::Point(margin, 30), 
+                cv::FONT_HERSHEY_SIMPLEX, 0.9, cv::Scalar(0, 0, 0), 2);
+    
+    // X軸ラベル（共通）
     cv::putText(hist_img, "Node ID", 
                 cv::Point(margin + hist_width/2 - 40, img_height - 20), 
                 cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 0), 2);
     
-    for (int i = 0; i <= 10; ++i) {
-        float value = (max_belief * i) / 10.0f;
-        int y = margin + hist_height - (hist_height * i) / 10;
-        
-        std::string label = std::to_string(value);
-        label = label.substr(0, label.find('.') + 4);
-        
-        cv::putText(hist_img, label, 
-                    cv::Point(margin - 70, y + 5), 
-                    cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(0, 0, 0), 1);
-    }
-    
+    // X軸の目盛り（ノードID）- 下のヒストグラムの下に表示
     int label_interval = std::max(1, static_cast<int>(belief_.size()) / 20);
     for (size_t i = 0; i < belief_.size(); i += label_interval) {
         int x = margin + static_cast<int>(i) * bar_width + bar_width/2;
         std::string node_id = std::to_string(map_[i].id);
         
         cv::putText(hist_img, node_id, 
-                    cv::Point(x - 10, margin + hist_height + 20), 
+                    cv::Point(x - 10, likelihood_y_offset + hist_height + 20), 
                     cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(0, 0, 0), 1);
     }
     
     // 統計情報を表示
+    float max_belief = *std::max_element(belief_.begin(), belief_.end());
+    float max_likelihood = *std::max_element(obs_likelihood.begin(), obs_likelihood.end());
     float entropy = getBeliefEntropy();
+    
     std::string info_text = "Max Belief: " + std::to_string(max_belief).substr(0, 6) + 
+                           "  Max Likelihood: " + std::to_string(max_likelihood).substr(0, 6) +
                            "  Entropy: " + std::to_string(entropy).substr(0, 6) + 
                            "  Best Node: " + std::to_string(map_[max_idx].id);
     
     cv::putText(hist_img, info_text, 
                 cv::Point(margin, img_height - 40), 
-                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 0), 2);
+                cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 0), 2);
     
     // 最大信念値のノードに注釈を追加
     if (max_idx < static_cast<int>(belief_.size())) {
         int max_x = margin + max_idx * bar_width + bar_width/2;
-        int max_y = margin + hist_height - static_cast<int>((belief_[max_idx] / max_belief) * hist_height);
+        int max_y = belief_y_offset + hist_height - static_cast<int>((belief_[max_idx] / fixed_max_belief) * hist_height);
         
         // 矢印を描画
         cv::arrowedLine(hist_img, 
@@ -428,101 +512,7 @@ void TopoLocalizer::displayBliefHist() const {
                     cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 2);
     }
     
-    cv::imshow("Belief Distribution Histogram", hist_img);
-    cv::waitKey(1);
-}
-
-void TopoLocalizer::displayObsHist(const std::vector<float>& obs_likelihood) const {
-    if (obs_likelihood.empty()) {
-        std::cerr << "[TopoLocalizer] No observation likelihood data to display" << std::endl;
-        return;
-    }
-
-    const int img_width = 1200;
-    const int img_height = 600;
-    const int margin = 80;
-    const int hist_width = img_width - 2 * margin;
-    const int hist_height = img_height - 2 * margin;
-
-    cv::Mat hist_img(img_height, img_width, CV_8UC3, cv::Scalar(255, 255, 255));
-
-    float max_val = *std::max_element(obs_likelihood.begin(), obs_likelihood.end());
-    if (max_val < 1e-8f) max_val = 1.0f;
-
-    int bar_width = hist_width / static_cast<int>(obs_likelihood.size());
-    if (bar_width < 1) bar_width = 1;
-
-    // バーの描画
-    for (size_t i = 0; i < obs_likelihood.size(); ++i) {
-        int bar_height = static_cast<int>((obs_likelihood[i] / max_val) * hist_height);
-        int x = margin + static_cast<int>(i) * bar_width;
-        int y = margin + hist_height - bar_height;
-
-        // バーの塗りつぶし（赤色）
-        cv::rectangle(hist_img,
-                     cv::Point(x + 1, y),
-                     cv::Point(x + bar_width - 1, margin + hist_height),
-                     cv::Scalar(0, 0, 255),
-                     cv::FILLED);
-
-        // バーの輪郭
-        cv::rectangle(hist_img,
-                     cv::Point(x + 1, y),
-                     cv::Point(x + bar_width - 1, margin + hist_height),
-                     cv::Scalar(0, 0, 0),
-                     1);
-    }
-
-    // 軸の描画
-    cv::line(hist_img, cv::Point(margin, margin + hist_height), 
-             cv::Point(margin + hist_width, margin + hist_height), 
-             cv::Scalar(0, 0, 0), 2);
-    cv::line(hist_img, cv::Point(margin, margin), 
-             cv::Point(margin, margin + hist_height), 
-             cv::Scalar(0, 0, 0), 2);
-
-    // グリッドライン
-    for (int i = 1; i <= 10; ++i) {
-        int y = margin + (hist_height * i) / 10;
-        cv::line(hist_img,
-                 cv::Point(margin, y),
-                 cv::Point(margin + hist_width, y),
-                 cv::Scalar(220, 220, 220), 1);
-    }
-
-    // タイトル
-    cv::putText(hist_img, "Observation Likelihood Distribution", cv::Point(margin, 30),
-                cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 0), 2);
-
-    // 軸ラベル
-    cv::putText(hist_img, "Likelihood", cv::Point(10, margin + hist_height / 2),
-                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 0), 2);
-
-    cv::putText(hist_img, "Node ID", cv::Point(margin + hist_width / 2 - 40, img_height - 20),
-                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 0), 2);
-
-    // Y軸の目盛り
-    for (int i = 0; i <= 10; ++i) {
-        float value = (max_val * i) / 10.0f;
-        int y = margin + hist_height - (hist_height * i) / 10;
-        std::string label = std::to_string(value).substr(0, 5);
-
-        cv::putText(hist_img, label, cv::Point(margin - 70, y + 5),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(0, 0, 0), 1);
-    }
-
-    // X軸の目盛り（ノードID）
-    int label_interval = std::max(1, static_cast<int>(obs_likelihood.size()) / 20);
-    for (size_t i = 0; i < obs_likelihood.size(); i += label_interval) {
-        int x = margin + static_cast<int>(i) * bar_width + bar_width / 2;
-        std::string node_id = std::to_string(map_[i].id);
-
-        cv::putText(hist_img, node_id, cv::Point(x - 10, margin + hist_height + 20),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(0, 0, 0), 1);
-    }
-
-    // ウィンドウ表示
-    cv::imshow("Observation Likelihood Histogram", hist_img);
+    cv::imshow("Combined Histogram - Belief & Observation", hist_img);
     cv::waitKey(1);
 }
 

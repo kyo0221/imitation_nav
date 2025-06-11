@@ -43,8 +43,8 @@ private:
     std::vector<float> applyTransitionModel();
     void updateBelief(const std::vector<float>& predicted_belief, const std::vector<float>& obs_likelihood);
     void displayPredictedNode(int best_idx) const;
-    void displayBliefHist() const;
-    void displayObsHist(const std::vector<float>& obs_likelihood) const;
+    // void displayBliefHist() const;
+    void displayCombinedHist(const std::vector<float>& obs_likelihood) const;
 
     std::vector<TopoNode> map_;
     std::vector<float> belief_;
