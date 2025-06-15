@@ -16,6 +16,7 @@
   <depend>cv_bridge</depend>
   <depend>image_transport</depend>
   <depend>ament_index_cpp</depend>
+  <depend>opencv2</depend>
   
   <depend>libtorch</depend>
 

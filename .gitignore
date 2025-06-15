@@ -1,2 +1,5 @@
+.vscode/
 libtorch/
 weights/
+weights/*.pt
+config/
