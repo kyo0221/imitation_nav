@@ -3,6 +3,7 @@ imitation_nav_node:
     interval_ms: 100
     localization_interval_ms: 500
     model_name: model_aug_2-3.pt
+
     image_height: 88
     image_width: 200
     max_linear_vel: 0.4
