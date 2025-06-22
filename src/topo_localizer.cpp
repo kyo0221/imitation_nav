@@ -242,34 +242,31 @@ std::vector<float> TopoLocalizer::applyTransitionModel() {
     return predicted;
 }
 
-void TopoLocalizer::updateBelief(const std::vector<float>& predicted_belief, 
-                                const std::vector<float>& obs_likelihood) {
-    float sum = 0.0f;
-    
-    // ベイズ更新: P(state|obs) ∝ P(obs|state) * P(state)
-    for (size_t i = 0; i < belief_.size(); ++i) {
-        belief_[i] = predicted_belief[i] * obs_likelihood[i];
-        sum += belief_[i];
+void TopoLocalizer::updateBelief(const std::vector<float>& predicted_belief,
+                                 const std::vector<float>& obs_likelihood) {
+    size_t n = predicted_belief.size();
+    belief_.resize(n);
+
+    auto max_iter = std::max_element(predicted_belief.begin(), predicted_belief.end());
+    int best_idx = std::distance(predicted_belief.begin(), max_iter);
+
+    for (size_t i = 0; i < n; ++i) {
+        int offset = static_cast<int>(i) - best_idx;
+        if (offset < window_lower_ || offset > window_upper_) {
+            belief_[i] = 0.0f;  // 遷移ウィンドウ外は信念をゼロに
+        } else {
+            belief_[i] = predicted_belief[i] * obs_likelihood[i];
+        }
     }
-    
+
     // 正規化
-    if (sum > 1e-8f) {
-        for (float& b : belief_) {
+    float sum = std::accumulate(belief_.begin(), belief_.end(), 0.0f);
+    if (sum > 1e-6f) {
+        for (auto& b : belief_) {
             b /= sum;
         }
     } else {
-        // 数値的に不安定な場合は観測尤度のみを使用
-        std::cout << "[TopoLocalizer] Warning: Numerical instability detected, using observation likelihood only" << std::endl;
-        sum = 0.0f;
-        for (size_t i = 0; i < belief_.size(); ++i) {
-            belief_[i] = obs_likelihood[i];
-            sum += belief_[i];
-        }
-        if (sum > 1e-8f) {
-            for (float& b : belief_) {
-                b /= sum;
-            }
-        }
+        std::cerr << "[TopoLocalizer] Warning: Belief normalization failed (sum too small)." << std::endl;
     }
 }
 
