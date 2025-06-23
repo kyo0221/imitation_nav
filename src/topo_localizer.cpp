@@ -134,7 +134,7 @@ void TopoLocalizer::loadMap(const std::string& map_path) {
         if (node["edges"] && node["edges"].size() > 0) {
             topo.action = node["edges"][0]["action"].as<std::string>();
         } else {
-            topo.action = "straight";
+            topo.action = "roadside";
         }
         
         topo.feature.clear();
@@ -520,7 +520,7 @@ std::string TopoLocalizer::getNodeAction(int node_id) const {
             return node.action;
         }
     }
-    return "straight";  // デフォルトアクション
+    return "roadside";  // デフォルトアクション
 }
 
 float TopoLocalizer::getMaxBelief() const {

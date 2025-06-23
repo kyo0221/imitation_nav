@@ -84,11 +84,12 @@ void ImitationNav::ImitationNavigation()
 
         RCLCPP_INFO(this->get_logger(), "current node id : %d, action command : %s", node_id_, action.c_str());
 
-        if (action == "straight") command_idx = 0;
-        else if (action == "left") command_idx = 1;
-        else if (action == "right") command_idx = 2;
+        if (action == "roadside") command_idx = 0;
+        else if (action == "straight") command_idx = 1;
+        else if (action == "left") command_idx = 2;
+        else if (action == "right") command_idx = 3;
         else {
-            RCLCPP_WARN(this->get_logger(), "Unknown matched action: %s. Defaulting to 'straight'", action.c_str());
+            RCLCPP_WARN(this->get_logger(), "Unknown matched action: %s. Defaulting to 'roadside'", action.c_str());
             command_idx = 0;
         }
 
@@ -100,7 +101,7 @@ void ImitationNav::ImitationNavigation()
             .clone()
             .to(torch::kCUDA);
 
-        at::Tensor cmd_tensor = torch::zeros({1, 3}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
+        at::Tensor cmd_tensor = torch::zeros({1, 4}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
         cmd_tensor[0][command_idx] = 1.0;
 
         at::Tensor output = model_.forward({image_tensor, cmd_tensor}).toTensor();
