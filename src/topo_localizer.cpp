@@ -270,12 +270,69 @@ void TopoLocalizer::updateBelief(const std::vector<float>& predicted_belief,
     }
 }
 
+cv::Mat TopoLocalizer::addCommandOverlay(const cv::Mat& image, const std::string& command) const {
+    cv::Mat result = image.clone();
+    
+    // オーバーレイエリアの設定
+    int overlay_height = 80;
+    int button_width = 100;
+    int button_height = 60;
+    int margin = 20;
+    
+    // 下部にオーバーレイエリアを作成
+    cv::Rect overlay_rect(0, result.rows - overlay_height, result.cols, overlay_height);
+    cv::Mat overlay = result(overlay_rect);
+    overlay = cv::Scalar(30, 30, 30); // 暗いグレー背景
+    
+    // ボタンの位置を計算
+    int total_width = 4 * button_width + 5 * margin;
+    int start_x = (result.cols - total_width) / 2;
+    int button_y = result.rows - overlay_height + 10;
+    
+    // 各コマンドボタンを描画
+    std::vector<std::string> commands = {"roadside", "straight", "left", "right"};
+    std::vector<cv::Scalar> colors = {
+        cv::Scalar(100, 100, 100),  // roadside - グレー
+        cv::Scalar(100, 100, 100),  // straight - グレー
+        cv::Scalar(100, 100, 100),  // left - グレー
+        cv::Scalar(100, 100, 100)   // right - グレー
+    };
+    
+    // アクティブなコマンドを特定して色を変更
+    for (size_t i = 0; i < commands.size(); ++i) {
+        if (commands[i] == command) {
+            colors[i] = cv::Scalar(0, 255, 0); // アクティブは緑色
+        }
+    }
+    
+    // ボタンを描画
+    for (size_t i = 0; i < commands.size(); ++i) {
+        int x = start_x + i * (button_width + margin);
+        cv::Rect button_rect(x, button_y, button_width, button_height);
+        
+        // ボタンの背景
+        cv::rectangle(result, button_rect, colors[i], -1);
+        cv::rectangle(result, button_rect, cv::Scalar(255, 255, 255), 2);
+        
+        // テキスト
+        cv::Point text_pos(x + 10, button_y + 35);
+        cv::putText(result, commands[i], text_pos, cv::FONT_HERSHEY_SIMPLEX, 0.5, 
+                   cv::Scalar(255, 255, 255), 2);
+    }
+    
+    return result;
+}
+
 void TopoLocalizer::displayPredictedNode(int best_idx) const {
     cv::Mat best_node_image = cv::imread(image_path_ + map_[best_idx].image_path);
     if (!best_node_image.empty()) {
         cv::Mat resized;
         cv::resize(best_node_image, resized, cv::Size(480, 480));
-        cv::imshow("Predicted Node Image", resized);
+        
+        // 指令情報オーバーレイを追加
+        cv::Mat display_image = addCommandOverlay(resized, map_[best_idx].action);
+        
+        cv::imshow("Predicted Node Image", display_image);
         cv::waitKey(1);
     } else {
         std::cerr << "[TopoLocalizer] Failed to load image at: " 
