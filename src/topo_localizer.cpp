@@ -22,7 +22,7 @@ TopoLocalizer::TopoLocalizer(const std::string& map_path, const std::string& mod
     setTransitionWindow(-2, 3);
 }
 
-void TopoLocalizer::initializeModel(const cv::Mat& image) {
+void TopoLocalizer::initializeModel(const cv::Mat& image, bool use_observation_based_init) {
     torch::Tensor query_feature = extractFeature(image);
 
     std::vector<float> dists;
@@ -53,22 +53,45 @@ void TopoLocalizer::initializeModel(const cv::Mat& image) {
 
     // 初期信念分布を設定
     belief_.resize(map_.size());
-    initializeBelief(dists);
+    initializeBelief(dists, use_observation_based_init);
     
     is_initialized_ = true;
     
-    std::cout << "[TopoLocalizer] Initialized with lambda1 = " << lambda1_ << std::endl;
+    std::cout << "[TopoLocalizer] Initialized with lambda1 = " << lambda1_ 
+              << ", observation_based_init = " << (use_observation_based_init ? "true" : "false") << std::endl;
 }
 
-void TopoLocalizer::initializeBelief(const std::vector<float>& distances) {
-    const size_t uniform_range = 5;
-    
+void TopoLocalizer::initializeBelief(const std::vector<float>& distances, bool use_observation_based_init) {
     // 全ての信念値を0で初期化
     std::fill(belief_.begin(), belief_.end(), 0.0f);
     
-    float uniform_prob = 1.0f / uniform_range;
-    for (size_t i = 0; i < std::min(uniform_range, belief_.size()); ++i) {
-        belief_[i] = uniform_prob;
+    if (use_observation_based_init) {
+        // 観測尤度ベースの初期化：最も類似度の高いノードを中心に初期化
+        auto min_iter = std::min_element(distances.begin(), distances.end());
+        int best_idx = std::distance(distances.begin(), min_iter);
+        
+        const size_t uniform_range = 5;
+        float uniform_prob = 1.0f / uniform_range;
+        
+        // 最も類似度の高いノードを中心に初期化
+        int start_idx = std::max(0, best_idx - static_cast<int>(uniform_range) / 2);
+        int end_idx = std::min(static_cast<int>(belief_.size()), start_idx + static_cast<int>(uniform_range));
+        
+        for (int i = start_idx; i < end_idx; ++i) {
+            belief_[i] = uniform_prob;
+        }
+        
+        std::cout << "[TopoLocalizer] Observation-based initialization centered at node " << best_idx << std::endl;
+    } else {
+        // ID0中心の初期化（従来の方法）
+        const size_t uniform_range = 5;
+        float uniform_prob = 1.0f / uniform_range;
+        
+        for (size_t i = 0; i < std::min(uniform_range, belief_.size()); ++i) {
+            belief_[i] = uniform_prob;
+        }
+        
+        std::cout << "[TopoLocalizer] ID0-centered initialization" << std::endl;
     }
 }
 

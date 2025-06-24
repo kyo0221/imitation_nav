@@ -55,6 +55,7 @@ private:
   const bool visualize_flag_;
   const int window_lower_;
   const int window_upper_;
+  const bool use_observation_based_init_;
 
   bool autonomous_flag_=false;
   bool init_flag_=true;

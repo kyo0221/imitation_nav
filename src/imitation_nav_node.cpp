@@ -20,6 +20,7 @@ image_height_(get_parameter("image_height").as_int()),
 visualize_flag_(get_parameter("visualize_flag").as_bool()),
 window_lower_(get_parameter("window_lower").as_int()),
 window_upper_(get_parameter("window_upper").as_int()),
+use_observation_based_init_(get_parameter("use_observation_based_init").as_bool()),
 topo_localizer_(
     ament_index_cpp::get_package_share_directory("imitation_nav") + "/config/topo_map/topomap.yaml",
     ament_index_cpp::get_package_share_directory("imitation_nav") + "/weights/placenet/placenet.pt",
@@ -62,9 +63,10 @@ void ImitationNav::ImageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         latest_image_ = cv_ptr->image.clone();
 
         if(init_flag_ && autonomous_flag_){
-            topo_localizer_.initializeModel(latest_image_);
+            topo_localizer_.initializeModel(latest_image_, use_observation_based_init_);
             topo_localizer_.setTransitionWindow(window_lower_, window_upper_);
-            RCLCPP_INFO(this->get_logger(), "initialize model");
+            RCLCPP_INFO(this->get_logger(), "initialize model with observation_based_init: %s", 
+                       use_observation_based_init_ ? "true" : "false");
             init_flag_=false;
         }
     } catch (const cv_bridge::Exception &e) {
