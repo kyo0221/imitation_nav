@@ -12,3 +12,6 @@ imitation_nav_node:
     window_lower: -2
     window_upper: 10
     use_observation_based_init: false
+    
+    # Obstacle detection parameters
+    obstacle_distance_threshold: 0.3  # Distance threshold for obstacle detection (0.0-1.0, where 0.0 is closest)

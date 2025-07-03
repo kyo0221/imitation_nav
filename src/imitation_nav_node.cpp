@@ -21,6 +21,7 @@ visualize_flag_(get_parameter("visualize_flag").as_bool()),
 window_lower_(get_parameter("window_lower").as_int()),
 window_upper_(get_parameter("window_upper").as_int()),
 use_observation_based_init_(get_parameter("use_observation_based_init").as_bool()),
+obstacle_distance_threshold_(get_parameter("obstacle_distance_threshold").as_double()),
 topo_localizer_(
     ament_index_cpp::get_package_share_directory("imitation_nav") + "/config/topo_map/topomap.yaml",
     ament_index_cpp::get_package_share_directory("imitation_nav") + "/weights/placenet/placenet.pt",
@@ -32,6 +33,9 @@ topo_localizer_(
 
     image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
         "/image_raw", 10, std::bind(&ImitationNav::ImageCallback, this, std::placeholders::_1));
+
+    depth_image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
+        "/depth_anything_v2/depth_image", 10, std::bind(&ImitationNav::DepthImageCallback, this, std::placeholders::_1));
 
     cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
 
@@ -74,6 +78,67 @@ void ImitationNav::ImageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
     }
 }
 
+void ImitationNav::DepthImageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
+{
+    try {
+        cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");
+        latest_depth_image_ = cv_ptr->image.clone();
+        
+        // Check for obstacles in the path
+        obstacle_detected_ = checkObstacleInPath(latest_depth_image_);
+        
+    } catch (const cv_bridge::Exception &e) {
+        RCLCPP_ERROR(this->get_logger(), "cv_bridge exception in depth callback: %s", e.what());
+    }
+}
+
+bool ImitationNav::checkObstacleInPath(const cv::Mat& depth_image)
+{
+    if (depth_image.empty()) {
+        return false;
+    }
+    
+    // Focus on upper half of the image
+    int height = depth_image.rows;
+    int width = depth_image.cols;
+    int upper_half_height = height / 2;
+    
+    // Create ROI for upper half
+    cv::Rect roi(0, 0, width, upper_half_height);
+    cv::Mat upper_half = depth_image(roi);
+    
+    // Convert to grayscale if it's a color image
+    cv::Mat gray_image;
+    if (upper_half.channels() == 3) {
+        cv::cvtColor(upper_half, gray_image, cv::COLOR_BGR2GRAY);
+    } else {
+        gray_image = upper_half.clone();
+    }
+    
+    // Calculate the number of pixels representing close objects
+    // Assuming depth visualization: darker pixels = closer objects, lighter = farther
+    // For typical depth colormap, closer objects appear in warmer colors (red/orange)
+    // We'll use a simple threshold approach
+    
+    double threshold_intensity = obstacle_distance_threshold_ * 255.0; // Convert to pixel intensity
+    cv::Mat mask;
+    cv::threshold(gray_image, mask, threshold_intensity, 255, cv::THRESH_BINARY_INV);
+    
+    // Count pixels below threshold (close objects)
+    int close_pixels = cv::countNonZero(mask);
+    int total_pixels = gray_image.rows * gray_image.cols;
+    
+    // If more than 5% of upper half pixels represent close objects, consider it an obstacle
+    double close_pixel_ratio = static_cast<double>(close_pixels) / total_pixels;
+    bool obstacle_found = close_pixel_ratio > 0.05;
+    
+    if (obstacle_found) {
+        RCLCPP_WARN(this->get_logger(), "Obstacle detected! Close pixel ratio: %.2f%%", close_pixel_ratio * 100.0);
+    }
+    
+    return obstacle_found;
+}
+
 void ImitationNav::ImitationNavigation()
 {
     if (!autonomous_flag_ || init_flag_ || latest_image_.empty()) return;
@@ -107,13 +172,19 @@ void ImitationNav::ImitationNavigation()
         cmd_tensor[0][command_idx] = 1.0;
 
         at::Tensor output = model_.forward({image_tensor, cmd_tensor}).toTensor();
+
         double predicted_angular = output.item<float>();
         predicted_angular = std::clamp(predicted_angular, -angular_max_, angular_max_);
 
         geometry_msgs::msg::Twist cmd_msg;
-        cmd_msg.linear.x = linear_max_;
+        // Set linear velocity to 0 if obstacle is detected, otherwise use max linear velocity
+        cmd_msg.linear.x = obstacle_detected_ ? 0.0 : linear_max_;
         cmd_msg.angular.z = predicted_angular;
         cmd_pub_->publish(cmd_msg);
+        
+        if (obstacle_detected_) {
+            RCLCPP_WARN(this->get_logger(), "Obstacle detected! Setting linear velocity to 0");
+        }
 
     } catch (const c10::Error &e) {
         RCLCPP_ERROR(this->get_logger(), "TorchScript inference error: %s", e.what());
