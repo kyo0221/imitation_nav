@@ -31,12 +31,15 @@ private:
   void autonomousFlagCallback(const std_msgs::msg::Bool::SharedPtr msg);
   void RouteCommandCallback(const std_msgs::msg::String::SharedPtr msg);
   void ImageCallback(const sensor_msgs::msg::Image::SharedPtr msg);
+  void DepthImageCallback(const sensor_msgs::msg::Image::SharedPtr msg);
 
   void ImitationNavigation();
+  bool checkObstacleInPath(const cv::Mat& depth_image);
 
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr autonomous_flag_subscriber_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr route_command_subscriber_;
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr depth_image_sub_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
 
   rclcpp::TimerBase::SharedPtr timer_;
@@ -44,6 +47,7 @@ private:
   torch::jit::script::Module model_;
 
   cv::Mat latest_image_;
+  cv::Mat latest_depth_image_;
 
   const int interval_ms;
   const int localization_interval_ms;
@@ -55,9 +59,12 @@ private:
   const bool visualize_flag_;
   const int window_lower_;
   const int window_upper_;
+  const bool use_observation_based_init_;
+  const double obstacle_distance_threshold_;
 
   bool autonomous_flag_=false;
   bool init_flag_=true;
+  bool obstacle_detected_=false;
   
   imitation_nav::TopoLocalizer topo_localizer_;
 };

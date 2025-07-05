@@ -21,7 +21,7 @@ class TopoLocalizer {
 public:
     TopoLocalizer(const std::string& map_path, const std::string& model_path, const std::string& image_dir);
     
-    void initializeModel(const cv::Mat& image);
+    void initializeModel(const cv::Mat& image, bool use_observation_based_init = false);
     void setTransitionWindow(int window_lower, int window_upper);
     int inferNode(const cv::Mat& input_image);
     
@@ -34,7 +34,7 @@ private:
     // 内部メソッド
     void loadMap(const std::string& map_path);
     torch::Tensor extractFeature(const cv::Mat& image);
-    void initializeBelief(const std::vector<float>& distances);
+    void initializeBelief(const std::vector<float>& distances, bool use_observation_based_init = false);
     void initializePlot();
     void setupGaussianTransition();
     float computeFeatureDistance(const torch::Tensor& feat1, const torch::Tensor& feat2);
@@ -43,6 +43,7 @@ private:
     std::vector<float> applyTransitionModel();
     void updateBelief(const std::vector<float>& predicted_belief, const std::vector<float>& obs_likelihood);
     void displayPredictedNode(int best_idx) const;
+    cv::Mat addCommandOverlay(const cv::Mat& image, const std::string& command) const;
     // void displayBliefHist() const;
     void displayCombinedHist(const std::vector<float>& obs_likelihood) const;
 

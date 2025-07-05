@@ -2,12 +2,16 @@ imitation_nav_node:
   ros__parameters:
     interval_ms: 100
     localization_interval_ms: 500
-    model_name: model_aug_2-3.pt
+    model_name: sim_test_roadside.pt
 
     image_height: 88
     image_width: 200
     max_linear_vel: 0.4
-    max_angular_vel: 1.57
+    max_angular_vel: 1.0
     visualize_flag: false
     window_lower: -2
     window_upper: 10
+    use_observation_based_init: false
+    
+    # Obstacle detection parameters
+    obstacle_distance_threshold: 0.3  # Distance threshold for obstacle detection (0.0-1.0, where 0.0 is closest)

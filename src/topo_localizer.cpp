@@ -22,7 +22,7 @@ TopoLocalizer::TopoLocalizer(const std::string& map_path, const std::string& mod
     setTransitionWindow(-2, 3);
 }
 
-void TopoLocalizer::initializeModel(const cv::Mat& image) {
+void TopoLocalizer::initializeModel(const cv::Mat& image, bool use_observation_based_init) {
     torch::Tensor query_feature = extractFeature(image);
 
     std::vector<float> dists;
@@ -53,22 +53,45 @@ void TopoLocalizer::initializeModel(const cv::Mat& image) {
 
     // 初期信念分布を設定
     belief_.resize(map_.size());
-    initializeBelief(dists);
+    initializeBelief(dists, use_observation_based_init);
     
     is_initialized_ = true;
     
-    std::cout << "[TopoLocalizer] Initialized with lambda1 = " << lambda1_ << std::endl;
+    std::cout << "[TopoLocalizer] Initialized with lambda1 = " << lambda1_ 
+              << ", observation_based_init = " << (use_observation_based_init ? "true" : "false") << std::endl;
 }
 
-void TopoLocalizer::initializeBelief(const std::vector<float>& distances) {
-    const size_t uniform_range = 5;
-    
+void TopoLocalizer::initializeBelief(const std::vector<float>& distances, bool use_observation_based_init) {
     // 全ての信念値を0で初期化
     std::fill(belief_.begin(), belief_.end(), 0.0f);
     
-    float uniform_prob = 1.0f / uniform_range;
-    for (size_t i = 0; i < std::min(uniform_range, belief_.size()); ++i) {
-        belief_[i] = uniform_prob;
+    if (use_observation_based_init) {
+        // 観測尤度ベースの初期化：最も類似度の高いノードを中心に初期化
+        auto min_iter = std::min_element(distances.begin(), distances.end());
+        int best_idx = std::distance(distances.begin(), min_iter);
+        
+        const size_t uniform_range = 5;
+        float uniform_prob = 1.0f / uniform_range;
+        
+        // 最も類似度の高いノードを中心に初期化
+        int start_idx = std::max(0, best_idx - static_cast<int>(uniform_range) / 2);
+        int end_idx = std::min(static_cast<int>(belief_.size()), start_idx + static_cast<int>(uniform_range));
+        
+        for (int i = start_idx; i < end_idx; ++i) {
+            belief_[i] = uniform_prob;
+        }
+        
+        std::cout << "[TopoLocalizer] Observation-based initialization centered at node " << best_idx << std::endl;
+    } else {
+        // ID0中心の初期化（従来の方法）
+        const size_t uniform_range = 5;
+        float uniform_prob = 1.0f / uniform_range;
+        
+        for (size_t i = 0; i < std::min(uniform_range, belief_.size()); ++i) {
+            belief_[i] = uniform_prob;
+        }
+        
+        std::cout << "[TopoLocalizer] ID0-centered initialization" << std::endl;
     }
 }
 
@@ -134,7 +157,7 @@ void TopoLocalizer::loadMap(const std::string& map_path) {
         if (node["edges"] && node["edges"].size() > 0) {
             topo.action = node["edges"][0]["action"].as<std::string>();
         } else {
-            topo.action = "straight";
+            topo.action = "roadside";
         }
         
         topo.feature.clear();
@@ -242,35 +265,85 @@ std::vector<float> TopoLocalizer::applyTransitionModel() {
     return predicted;
 }
 
-void TopoLocalizer::updateBelief(const std::vector<float>& predicted_belief, 
-                                const std::vector<float>& obs_likelihood) {
-    float sum = 0.0f;
-    
-    // ベイズ更新: P(state|obs) ∝ P(obs|state) * P(state)
-    for (size_t i = 0; i < belief_.size(); ++i) {
-        belief_[i] = predicted_belief[i] * obs_likelihood[i];
-        sum += belief_[i];
+void TopoLocalizer::updateBelief(const std::vector<float>& predicted_belief,
+                                 const std::vector<float>& obs_likelihood) {
+    size_t n = predicted_belief.size();
+    belief_.resize(n);
+
+    auto max_iter = std::max_element(predicted_belief.begin(), predicted_belief.end());
+    int best_idx = std::distance(predicted_belief.begin(), max_iter);
+
+    for (size_t i = 0; i < n; ++i) {
+        int offset = static_cast<int>(i) - best_idx;
+        if (offset < window_lower_ || offset > window_upper_) {
+            belief_[i] = 0.0f;  // 遷移ウィンドウ外は信念をゼロに
+        } else {
+            belief_[i] = predicted_belief[i] * obs_likelihood[i];
+        }
     }
-    
+
     // 正規化
-    if (sum > 1e-8f) {
-        for (float& b : belief_) {
+    float sum = std::accumulate(belief_.begin(), belief_.end(), 0.0f);
+    if (sum > 1e-6f) {
+        for (auto& b : belief_) {
             b /= sum;
         }
     } else {
-        // 数値的に不安定な場合は観測尤度のみを使用
-        std::cout << "[TopoLocalizer] Warning: Numerical instability detected, using observation likelihood only" << std::endl;
-        sum = 0.0f;
-        for (size_t i = 0; i < belief_.size(); ++i) {
-            belief_[i] = obs_likelihood[i];
-            sum += belief_[i];
-        }
-        if (sum > 1e-8f) {
-            for (float& b : belief_) {
-                b /= sum;
-            }
+        std::cerr << "[TopoLocalizer] Warning: Belief normalization failed (sum too small)." << std::endl;
+    }
+}
+
+cv::Mat TopoLocalizer::addCommandOverlay(const cv::Mat& image, const std::string& command) const {
+    cv::Mat result = image.clone();
+    
+    // オーバーレイエリアの設定
+    int overlay_height = 80;
+    int button_width = 100;
+    int button_height = 60;
+    int margin = 20;
+    
+    // 下部にオーバーレイエリアを作成
+    cv::Rect overlay_rect(0, result.rows - overlay_height, result.cols, overlay_height);
+    cv::Mat overlay = result(overlay_rect);
+    overlay = cv::Scalar(30, 30, 30); // 暗いグレー背景
+    
+    // ボタンの位置を計算
+    int total_width = 4 * button_width + 5 * margin;
+    int start_x = (result.cols - total_width) / 2;
+    int button_y = result.rows - overlay_height + 10;
+    
+    // 各コマンドボタンを描画
+    std::vector<std::string> commands = {"roadside", "straight", "left", "right"};
+    std::vector<cv::Scalar> colors = {
+        cv::Scalar(100, 100, 100),  // roadside - グレー
+        cv::Scalar(100, 100, 100),  // straight - グレー
+        cv::Scalar(100, 100, 100),  // left - グレー
+        cv::Scalar(100, 100, 100)   // right - グレー
+    };
+    
+    // アクティブなコマンドを特定して色を変更
+    for (size_t i = 0; i < commands.size(); ++i) {
+        if (commands[i] == command) {
+            colors[i] = cv::Scalar(0, 255, 0); // アクティブは緑色
         }
     }
+    
+    // ボタンを描画
+    for (size_t i = 0; i < commands.size(); ++i) {
+        int x = start_x + i * (button_width + margin);
+        cv::Rect button_rect(x, button_y, button_width, button_height);
+        
+        // ボタンの背景
+        cv::rectangle(result, button_rect, colors[i], -1);
+        cv::rectangle(result, button_rect, cv::Scalar(255, 255, 255), 2);
+        
+        // テキスト
+        cv::Point text_pos(x + 10, button_y + 35);
+        cv::putText(result, commands[i], text_pos, cv::FONT_HERSHEY_SIMPLEX, 0.5, 
+                   cv::Scalar(255, 255, 255), 2);
+    }
+    
+    return result;
 }
 
 void TopoLocalizer::displayPredictedNode(int best_idx) const {
@@ -278,7 +351,11 @@ void TopoLocalizer::displayPredictedNode(int best_idx) const {
     if (!best_node_image.empty()) {
         cv::Mat resized;
         cv::resize(best_node_image, resized, cv::Size(480, 480));
-        cv::imshow("Predicted Node Image", resized);
+        
+        // 指令情報オーバーレイを追加
+        cv::Mat display_image = addCommandOverlay(resized, map_[best_idx].action);
+        
+        cv::imshow("Predicted Node Image", display_image);
         cv::waitKey(1);
     } else {
         std::cerr << "[TopoLocalizer] Failed to load image at: " 
@@ -523,7 +600,7 @@ std::string TopoLocalizer::getNodeAction(int node_id) const {
             return node.action;
         }
     }
-    return "straight";  // デフォルトアクション
+    return "roadside";  // デフォルトアクション
 }
 
 float TopoLocalizer::getMaxBelief() const {
