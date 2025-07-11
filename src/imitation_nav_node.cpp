@@ -1,4 +1,5 @@
 #include "imitation_nav/imitation_nav_node.hpp"
+#include <chrono>
 
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
@@ -12,6 +13,7 @@ ImitationNav::ImitationNav(const std::string &name_space, const rclcpp::NodeOpti
 : rclcpp::Node("imitation_nav_node", name_space, options),
 interval_ms(get_parameter("interval_ms").as_int()),
 localization_interval_ms(get_parameter("localization_interval_ms").as_int()),
+autonomous_flag_(false),
 model_name(get_parameter("model_name").as_string()),
 linear_max_(get_parameter("max_linear_vel").as_double()),
 angular_max_(get_parameter("max_angular_vel").as_double()),
@@ -86,7 +88,7 @@ void ImitationNav::ImitationNavigation()
         std::string action = topo_localizer_.getNodeAction(node_id_);
         int command_idx = 0;
 
-        RCLCPP_INFO(this->get_logger(), "current node id : %d, action command : %s", node_id_, action.c_str());
+        // RCLCPP_INFO(this->get_logger(), "current node id : %d, action command : %s", node_id_, action.c_str());
 
         if (action == "roadside") command_idx = 0;
         else if (action == "straight") command_idx = 1;
@@ -108,10 +110,16 @@ void ImitationNav::ImitationNavigation()
         at::Tensor cmd_tensor = torch::zeros({1, 4}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
         cmd_tensor[0][command_idx] = 1.0;
 
+        auto model_start = std::chrono::high_resolution_clock::now();
         at::Tensor output = model_.forward({image_tensor, cmd_tensor}).toTensor();
+        auto model_end = std::chrono::high_resolution_clock::now();
 
-        double predicted_angular = output.item<float>();
+        // 未来時系列予測の最初の値を使用
+        double predicted_angular = output[0][0].item<float>();
         predicted_angular = std::clamp(predicted_angular, -angular_max_, angular_max_);
+        
+        auto model_duration = std::chrono::duration_cast<std::chrono::microseconds>(model_end - model_start);
+        RCLCPP_INFO(this->get_logger(), "Model inference time: %ld μs, cmd_vel: %f", model_duration.count(), predicted_angular);
 
         geometry_msgs::msg::Twist cmd_msg;
         cmd_msg.linear.x = linear_max_;
