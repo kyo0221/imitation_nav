@@ -2,7 +2,7 @@ imitation_nav_node:
   ros__parameters:
     interval_ms: 100
     localization_interval_ms: 500
-    model_name: simtest_resnet_30ep.pt
+    model_name: simtest_simple.pt
 
     image_height: 88
     image_width: 200
