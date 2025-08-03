@@ -60,7 +60,7 @@ void ImitationNav::autonomousFlagCallback(const std_msgs::msg::Bool::SharedPtr m
 void ImitationNav::ImageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
     try {
-        cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");
+        cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg, msg->encoding);
         latest_image_ = cv_ptr->image.clone();
 
         if(init_flag_ && autonomous_flag_){
@@ -97,13 +97,24 @@ void ImitationNav::ImitationNavigation()
             command_idx = 0;
         }
 
-        cv::Mat resized;
-        cv::resize(latest_image_, resized, cv::Size(image_width_, image_height_));
-        resized.convertTo(resized, CV_32FC3, 1.0 / 255.0);
-        at::Tensor image_tensor = torch::from_blob(resized.data, {1, image_height_, image_width_, 3})
-            .permute({0, 3, 1, 2})
-            .clone()
-            .to(torch::kCUDA);
+        cv::Mat processed;
+        
+        // 正方形クロップ（入力画像640x480前提）
+        int x_start = (latest_image_.cols - 480) / 2;
+        int y_start = (latest_image_.rows - 480) / 2;
+        
+        cv::Rect crop_rect(x_start, y_start, 480, 480);
+        processed = latest_image_(crop_rect).clone();
+        
+        at::Tensor image_tensor = torch::from_blob(
+        processed.data, 
+        {1, image_height_, image_width_, 3}, 
+        torch::kUInt8)
+        .permute({0, 3, 1, 2})
+        .clone()
+        .to(torch::kFloat32)
+        .div(255.0)
+        .to(torch::kCUDA);
 
         at::Tensor cmd_tensor = torch::zeros({1, 4}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
         cmd_tensor[0][command_idx] = 1.0;
