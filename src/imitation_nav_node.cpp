@@ -99,11 +99,11 @@ void ImitationNav::ImitationNavigation()
 
         cv::Mat processed;
         
-        // 正方形クロップ（入力画像640x480前提）
-        int x_start = (latest_image_.cols - 480) / 2;
-        int y_start = (latest_image_.rows - 480) / 2;
+        // 正方形クロップ
+        int x_start = (latest_image_.cols - latest_image_.rows) / 2;
+        int y_start = (latest_image_.rows - latest_image_.rows) / 2;
         
-        cv::Rect crop_rect(x_start, y_start, 480, 480);
+        cv::Rect crop_rect(x_start, y_start, latest_image_.rows, latest_image_.rows);
         processed = latest_image_(crop_rect).clone();
         
         at::Tensor image_tensor = torch::from_blob(
