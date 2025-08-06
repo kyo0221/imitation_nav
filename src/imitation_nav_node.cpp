@@ -97,15 +97,16 @@ void ImitationNav::ImitationNavigation()
             command_idx = 0;
         }
 
-        cv::Mat processed;
+        cv::Mat cropped, processed;
         
         // 正方形クロップ
         int x_start = (latest_image_.cols - latest_image_.rows) / 2;
         int y_start = (latest_image_.rows - latest_image_.rows) / 2;
         
         cv::Rect crop_rect(x_start, y_start, latest_image_.rows, latest_image_.rows);
-        processed = latest_image_(crop_rect).clone();
-        
+        cropped = latest_image_(crop_rect).clone();
+        cv::resize(cropped, processed, cv::Size(image_width_, image_height_));
+
         at::Tensor image_tensor = torch::from_blob(
         processed.data, 
         {1, image_height_, image_width_, 3}, 
