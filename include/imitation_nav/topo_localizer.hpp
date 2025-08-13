@@ -45,7 +45,6 @@ private:
     void displayPredictedNode(int best_idx) const;
     cv::Mat addCommandOverlay(const cv::Mat& image, const std::string& command) const;
     // void displayBliefHist() const;
-    void displayCombinedHist(const std::vector<float>& obs_likelihood) const;
 
     std::vector<TopoNode> map_;
     std::vector<float> belief_;

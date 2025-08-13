@@ -48,8 +48,6 @@ private:
   const std::string model_name;
   const double linear_max_;
   const double angular_max_;
-  const int image_width_;
-  const int image_height_;
   const bool visualize_flag_;
   const int window_lower_;
   const int window_upper_;

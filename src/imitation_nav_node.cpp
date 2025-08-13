@@ -15,8 +15,6 @@ localization_interval_ms(get_parameter("localization_interval_ms").as_int()),
 model_name(get_parameter("model_name").as_string()),
 linear_max_(get_parameter("max_linear_vel").as_double()),
 angular_max_(get_parameter("max_angular_vel").as_double()),
-image_width_(get_parameter("image_width").as_int()),
-image_height_(get_parameter("image_height").as_int()),
 visualize_flag_(get_parameter("visualize_flag").as_bool()),
 window_lower_(get_parameter("window_lower").as_int()),
 window_upper_(get_parameter("window_upper").as_int()),
@@ -60,7 +58,7 @@ void ImitationNav::autonomousFlagCallback(const std_msgs::msg::Bool::SharedPtr m
 void ImitationNav::ImageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
     try {
-        cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");
+        cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg, msg->encoding);
         latest_image_ = cv_ptr->image.clone();
 
         if(init_flag_ && autonomous_flag_){
@@ -81,8 +79,17 @@ void ImitationNav::ImitationNavigation()
     if (!autonomous_flag_ || init_flag_ || latest_image_.empty()) return;
 
     try {
-        int node_id_ = topo_localizer_.inferNode(latest_image_);
+        cv::Mat cropped, imitation_img, topomap_img;
 
+        int x_start = (latest_image_.cols - latest_image_.rows) / 2;
+        int y_start = (latest_image_.rows - latest_image_.rows) / 2;
+        
+        cv::Rect crop_rect(x_start, y_start, latest_image_.rows, latest_image_.rows);
+        cropped = latest_image_(crop_rect).clone();
+        cv::resize(cropped, topomap_img, cv::Size(85, 85));
+        cv::resize(cropped, imitation_img, cv::Size(224, 224));
+
+        int node_id_ = topo_localizer_.inferNode(topomap_img);
         std::string action = topo_localizer_.getNodeAction(node_id_);
         int command_idx = 0;
 
@@ -97,13 +104,15 @@ void ImitationNav::ImitationNavigation()
             command_idx = 0;
         }
 
-        cv::Mat resized;
-        cv::resize(latest_image_, resized, cv::Size(image_width_, image_height_));
-        resized.convertTo(resized, CV_32FC3, 1.0 / 255.0);
-        at::Tensor image_tensor = torch::from_blob(resized.data, {1, image_height_, image_width_, 3})
-            .permute({0, 3, 1, 2})
-            .clone()
-            .to(torch::kCUDA);
+        at::Tensor image_tensor = torch::from_blob(
+        imitation_img.data, 
+        {1, 224, 224, 3}, 
+        torch::kUInt8)
+        .permute({0, 3, 1, 2})
+        .clone()
+        .to(torch::kFloat32)
+        .div(255.0)
+        .to(torch::kCUDA);
 
         at::Tensor cmd_tensor = torch::zeros({1, 4}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
         cmd_tensor[0][command_idx] = 1.0;
