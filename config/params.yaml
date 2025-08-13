@@ -2,10 +2,8 @@ imitation_nav_node:
   ros__parameters:
     interval_ms: 100
     localization_interval_ms: 500
-    model_name: simtest_resnet_lock.pt
+    model_name: resnet_sim.pt
 
-    image_height: 224
-    image_width: 224
     max_linear_vel: 0.8
     max_angular_vel: 1.57
     visualize_flag: false
