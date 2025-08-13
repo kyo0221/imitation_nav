@@ -15,8 +15,6 @@ localization_interval_ms(get_parameter("localization_interval_ms").as_int()),
 model_name(get_parameter("model_name").as_string()),
 linear_max_(get_parameter("max_linear_vel").as_double()),
 angular_max_(get_parameter("max_angular_vel").as_double()),
-image_width_(get_parameter("image_width").as_int()),
-image_height_(get_parameter("image_height").as_int()),
 visualize_flag_(get_parameter("visualize_flag").as_bool()),
 window_lower_(get_parameter("window_lower").as_int()),
 window_upper_(get_parameter("window_upper").as_int()),
@@ -81,8 +79,17 @@ void ImitationNav::ImitationNavigation()
     if (!autonomous_flag_ || init_flag_ || latest_image_.empty()) return;
 
     try {
-        int node_id_ = topo_localizer_.inferNode(latest_image_);
+        cv::Mat cropped, imitation_img, topomap_img;
 
+        int x_start = (latest_image_.cols - latest_image_.rows) / 2;
+        int y_start = (latest_image_.rows - latest_image_.rows) / 2;
+        
+        cv::Rect crop_rect(x_start, y_start, latest_image_.rows, latest_image_.rows);
+        cropped = latest_image_(crop_rect).clone();
+        cv::resize(cropped, topomap_img, cv::Size(85, 85));
+        cv::resize(cropped, imitation_img, cv::Size(224, 224));
+
+        int node_id_ = topo_localizer_.inferNode(topomap_img);
         std::string action = topo_localizer_.getNodeAction(node_id_);
         int command_idx = 0;
 
@@ -97,19 +104,9 @@ void ImitationNav::ImitationNavigation()
             command_idx = 0;
         }
 
-        cv::Mat cropped, processed;
-        
-        // 正方形クロップ
-        int x_start = (latest_image_.cols - latest_image_.rows) / 2;
-        int y_start = (latest_image_.rows - latest_image_.rows) / 2;
-        
-        cv::Rect crop_rect(x_start, y_start, latest_image_.rows, latest_image_.rows);
-        cropped = latest_image_(crop_rect).clone();
-        cv::resize(cropped, processed, cv::Size(image_width_, image_height_));
-
         at::Tensor image_tensor = torch::from_blob(
-        processed.data, 
-        {1, image_height_, image_width_, 3}, 
+        imitation_img.data, 
+        {1, 224, 224, 3}, 
         torch::kUInt8)
         .permute({0, 3, 1, 2})
         .clone()
