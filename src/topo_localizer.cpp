@@ -308,57 +308,77 @@ void TopoLocalizer::updateBelief(const std::vector<float>& predicted_belief,
 
 cv::Mat TopoLocalizer::addCommandOverlay(const cv::Mat& image, const std::string& command) const {
     cv::Mat result = image.clone();
-    
-    // オーバーレイエリアの設定
-    int overlay_height = 80;
-    int button_width = 100;
-    int button_height = 60;
-    int margin = 20;
-    
-    // 下部にオーバーレイエリアを作成
-    cv::Rect overlay_rect(0, result.rows - overlay_height, result.cols, overlay_height);
-    cv::Mat overlay = result(overlay_rect);
-    overlay = cv::Scalar(30, 30, 30); // 暗いグレー背景
-    
-    // ボタンの位置を計算
-    int total_width = 5 * button_width + 6 * margin;
-    int start_x = (result.cols - total_width) / 2;
-    int button_y = result.rows - overlay_height + 10;
-    
-    // 各コマンドボタンを描画
-    std::vector<std::string> commands = {"roadside", "straight", "left", "right", "stop"};
-    std::vector<cv::Scalar> colors = {
-        cv::Scalar(100, 100, 100),  // roadside - グレー
-        cv::Scalar(100, 100, 100),  // straight - グレー
-        cv::Scalar(100, 100, 100),  // left - グレー
-        cv::Scalar(100, 100, 100),  // right - グレー
-        cv::Scalar(100, 100, 100)   // stop - グレー
-    };
-    
-    // アクティブなコマンドを特定して色を変更
-    for (size_t i = 0; i < commands.size(); ++i) {
-        if (commands[i] == command) {
-            if (command == "stop") {
-                colors[i] = cv::Scalar(0, 0, 255); // stopは赤色
-            } else {
-                colors[i] = cv::Scalar(0, 255, 0); // その他のアクティブは緑色
-            }
-        }
+
+    // --- 1. 色の定義 ---
+    const cv::Scalar WHITE(255, 255, 255);
+    const cv::Scalar YELLOW(0, 255, 255);
+    const cv::Scalar RED(0, 0, 255);
+
+    // --- 2. コマンドに応じて各矢印の色を決定 ---
+    cv::Scalar left_arrow_color = WHITE;
+    cv::Scalar straight_arrow_color = WHITE;
+    cv::Scalar right_arrow_color = WHITE;
+
+    if (command == "straight") {
+        straight_arrow_color = YELLOW;
+    } else if (command == "stop") {
+        straight_arrow_color = RED;
+    } else if (command == "left") {
+        left_arrow_color = YELLOW;
+    } else if (command == "right") {
+        right_arrow_color = YELLOW;
     }
+
+    // --- 3. 矢印と背景の座標・サイズを定義 ---
+    int base_y = result.rows - 80;
+    int center_x = result.cols / 2;
+    int arrow_spacing = 110;
+    int arrow_thickness = 16;
+    int background_radius = 45;
+
+    int left_center_x = center_x - arrow_spacing;
+    int right_center_x = center_x + arrow_spacing;
     
-    // ボタンを描画
-    for (size_t i = 0; i < commands.size(); ++i) {
-        int x = start_x + i * (button_width + margin);
-        cv::Rect button_rect(x, button_y, button_width, button_height);
+    // --- 4. 各矢印の背景となる黒い円を描画 ---
+    cv::circle(result, cv::Point(left_center_x, base_y), background_radius, cv::Scalar(0, 0, 0), -1, cv::LINE_AA);
+    cv::circle(result, cv::Point(center_x, base_y), background_radius, cv::Scalar(0, 0, 0), -1, cv::LINE_AA);
+    cv::circle(result, cv::Point(right_center_x, base_y), background_radius, cv::Scalar(0, 0, 0), -1, cv::LINE_AA);
+
+
+    // --- 5. 各矢印を「長方形」と「三角形」で描画 ---
+    int shaft_width = 16;
+    
+    {
+        cv::Rect shaft_rect(center_x - shaft_width / 2, base_y, shaft_width, 30);
+        cv::rectangle(result, shaft_rect, straight_arrow_color, -1, cv::LINE_AA);
         
-        // ボタンの背景
-        cv::rectangle(result, button_rect, colors[i], -1);
-        cv::rectangle(result, button_rect, cv::Scalar(255, 255, 255), 2);
-        
-        // テキスト
-        cv::Point text_pos(x + 10, button_y + 35);
-        cv::putText(result, commands[i], text_pos, cv::FONT_HERSHEY_SIMPLEX, 0.5, 
-                   cv::Scalar(255, 255, 255), 2);
+        std::vector<cv::Point> head_pts;
+        head_pts.push_back(cv::Point(center_x, base_y - 25));
+        head_pts.push_back(cv::Point(center_x - 20, base_y));
+        head_pts.push_back(cv::Point(center_x + 20, base_y));
+        cv::fillConvexPoly(result, head_pts, straight_arrow_color, cv::LINE_AA);
+    }
+
+    {
+        cv::Rect shaft_rect(left_center_x - 5, base_y - shaft_width / 2, 30, shaft_width);
+        cv::rectangle(result, shaft_rect, left_arrow_color, -1, cv::LINE_AA);
+
+        std::vector<cv::Point> head_pts;
+        head_pts.push_back(cv::Point(left_center_x - 25, base_y));
+        head_pts.push_back(cv::Point(left_center_x, base_y - 18));
+        head_pts.push_back(cv::Point(left_center_x, base_y + 18));
+        cv::fillConvexPoly(result, head_pts, left_arrow_color, cv::LINE_AA);
+    }
+
+    {
+        cv::Rect shaft_rect(right_center_x - 25, base_y - shaft_width / 2, 30, shaft_width);
+        cv::rectangle(result, shaft_rect, right_arrow_color, -1, cv::LINE_AA);
+
+        std::vector<cv::Point> head_pts;
+        head_pts.push_back(cv::Point(right_center_x + 25, base_y));
+        head_pts.push_back(cv::Point(right_center_x, base_y - 18));
+        head_pts.push_back(cv::Point(right_center_x, base_y + 18));
+        cv::fillConvexPoly(result, head_pts, right_arrow_color, cv::LINE_AA);
     }
     
     return result;
@@ -368,7 +388,7 @@ void TopoLocalizer::displayPredictedNode(int best_idx) const {
     cv::Mat best_node_image = cv::imread(image_path_ + map_[best_idx].image_path);
     if (!best_node_image.empty()) {
         cv::Mat resized;
-        cv::resize(best_node_image, resized, cv::Size(480, 480));
+        cv::resize(best_node_image, resized, cv::Size(640, 640));
         
         // 指令情報オーバーレイを追加
         cv::Mat display_image = addCommandOverlay(resized, map_[best_idx].action);
@@ -382,10 +402,33 @@ void TopoLocalizer::displayPredictedNode(int best_idx) const {
 }
 
 
-
 void TopoLocalizer::excludeStopNode(int node_id) {
-    excluded_nodes_.insert(node_id);
-    std::cout << "[TopoLocalizer] Node " << node_id << " excluded from future inference (stop detected)" << std::endl;
+    int center_idx = -1;
+    for (size_t i = 0; i < map_.size(); ++i) {
+        if (map_[i].id == node_id) {
+            center_idx = static_cast<int>(i);
+            break;
+        }
+    }
+    
+    if (center_idx == -1) {
+        std::cerr << "[TopoLocalizer] Node " << node_id << " not found in map" << std::endl;
+        return;
+    }
+    
+    for (int offset = -3; offset <= 3; ++offset) {
+        int target_idx = center_idx + offset;
+        
+        if (target_idx < 0) {
+            target_idx += static_cast<int>(map_.size());
+        } else if (target_idx >= static_cast<int>(map_.size())) {
+            target_idx -= static_cast<int>(map_.size());
+        }
+        
+        if (map_[target_idx].action == "stop") {
+            excluded_nodes_.insert(map_[target_idx].id);
+        }
+    }
 }
 
 std::string TopoLocalizer::getNodeAction(int node_id) const {
