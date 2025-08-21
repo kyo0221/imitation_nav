@@ -89,11 +89,24 @@ void ImitationNav::ImitationNavigation()
         cv::resize(cropped, topomap_img, cv::Size(85, 85));
         cv::resize(cropped, imitation_img, cv::Size(224, 224));
 
-        int node_id_ = topo_localizer_.inferNode(topomap_img);
+        bool is_stop = false;
+        int node_id_ = topo_localizer_.inferNode(topomap_img, is_stop);
         std::string action = topo_localizer_.getNodeAction(node_id_);
         int command_idx = 0;
 
         RCLCPP_INFO(this->get_logger(), "current node id : %d, action command : %s", node_id_, action.c_str());
+
+        // stop検出時の処理
+        if (is_stop) {
+            RCLCPP_WARN(this->get_logger(), "STOP detected at node %d. Disabling autonomous mode.", node_id_);
+            autonomous_flag_ = false;
+            
+            geometry_msgs::msg::Twist stop_msg;
+            stop_msg.linear.x = 0.0;
+            stop_msg.angular.z = 0.0;
+            cmd_pub_->publish(stop_msg);
+            return;
+        }
 
         if (action == "roadside") command_idx = 0;
         else if (action == "straight") command_idx = 1;
@@ -114,7 +127,7 @@ void ImitationNav::ImitationNavigation()
         .div(255.0)
         .to(torch::kCUDA);
 
-        at::Tensor cmd_tensor = torch::zeros({1, 4}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
+        at::Tensor cmd_tensor = torch::zeros({1, 5}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
         cmd_tensor[0][command_idx] = 1.0;
 
         at::Tensor output = model_.forward({image_tensor, cmd_tensor}).toTensor();

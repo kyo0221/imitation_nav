@@ -197,7 +197,8 @@ torch::Tensor TopoLocalizer::extractFeature(const cv::Mat& image) {
                 .squeeze(0);
 }
 
-int TopoLocalizer::inferNode(const cv::Mat& input_image) {
+int TopoLocalizer::inferNode(const cv::Mat& input_image, bool& is_stop) {
+    is_stop = false;
     if (!is_initialized_) {
         std::cerr << "[TopoLocalizer] Error: Model not initialized. Call initializeModel() first." << std::endl;
         return -1;
@@ -216,6 +217,13 @@ int TopoLocalizer::inferNode(const cv::Mat& input_image) {
     // 最尤推定
     auto max_iter = std::max_element(belief_.begin(), belief_.end());
     int best_idx = std::distance(belief_.begin(), max_iter);
+    
+    // stopアクション検出とノード除外
+    std::string action = getNodeAction(map_[best_idx].id);
+    if (action == "stop") {
+        is_stop = true;
+        excludeStopNode(map_[best_idx].id);
+    }
     
     // 結果画像の表示
     displayPredictedNode(best_idx);
@@ -273,6 +281,12 @@ void TopoLocalizer::updateBelief(const std::vector<float>& predicted_belief,
     int best_idx = std::distance(predicted_belief.begin(), max_iter);
 
     for (size_t i = 0; i < n; ++i) {
+        // 除外ノードの信念値を0に設定
+        if (excluded_nodes_.find(map_[i].id) != excluded_nodes_.end()) {
+            belief_[i] = 0.0f;
+            continue;
+        }
+        
         int offset = static_cast<int>(i) - best_idx;
         if (offset < window_lower_ || offset > window_upper_) {
             belief_[i] = 0.0f;  // 遷移ウィンドウ外は信念をゼロに
@@ -307,23 +321,28 @@ cv::Mat TopoLocalizer::addCommandOverlay(const cv::Mat& image, const std::string
     overlay = cv::Scalar(30, 30, 30); // 暗いグレー背景
     
     // ボタンの位置を計算
-    int total_width = 4 * button_width + 5 * margin;
+    int total_width = 5 * button_width + 6 * margin;
     int start_x = (result.cols - total_width) / 2;
     int button_y = result.rows - overlay_height + 10;
     
     // 各コマンドボタンを描画
-    std::vector<std::string> commands = {"roadside", "straight", "left", "right"};
+    std::vector<std::string> commands = {"roadside", "straight", "left", "right", "stop"};
     std::vector<cv::Scalar> colors = {
         cv::Scalar(100, 100, 100),  // roadside - グレー
         cv::Scalar(100, 100, 100),  // straight - グレー
         cv::Scalar(100, 100, 100),  // left - グレー
-        cv::Scalar(100, 100, 100)   // right - グレー
+        cv::Scalar(100, 100, 100),  // right - グレー
+        cv::Scalar(100, 100, 100)   // stop - グレー
     };
     
     // アクティブなコマンドを特定して色を変更
     for (size_t i = 0; i < commands.size(); ++i) {
         if (commands[i] == command) {
-            colors[i] = cv::Scalar(0, 255, 0); // アクティブは緑色
+            if (command == "stop") {
+                colors[i] = cv::Scalar(0, 0, 255); // stopは赤色
+            } else {
+                colors[i] = cv::Scalar(0, 255, 0); // その他のアクティブは緑色
+            }
         }
     }
     
@@ -363,6 +382,11 @@ void TopoLocalizer::displayPredictedNode(int best_idx) const {
 }
 
 
+
+void TopoLocalizer::excludeStopNode(int node_id) {
+    excluded_nodes_.insert(node_id);
+    std::cout << "[TopoLocalizer] Node " << node_id << " excluded from future inference (stop detected)" << std::endl;
+}
 
 std::string TopoLocalizer::getNodeAction(int node_id) const {
     for (const auto& node : map_) {

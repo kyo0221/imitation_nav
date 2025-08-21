@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <string>
+#include <set>
 #include <opencv2/opencv.hpp>
 #include <torch/torch.h>
 
@@ -23,9 +24,10 @@ public:
     
     void initializeModel(const cv::Mat& image, bool use_observation_based_init = false);
     void setTransitionWindow(int window_lower, int window_upper);
-    int inferNode(const cv::Mat& input_image);
+    int inferNode(const cv::Mat& input_image, bool& is_stop);
     
     std::string getNodeAction(int node_id) const;
+    void excludeStopNode(int node_id);
     
     float getMaxBelief() const;
     float getBeliefEntropy() const;
@@ -49,6 +51,7 @@ private:
     std::vector<TopoNode> map_;
     std::vector<float> belief_;
     std::vector<float> transition_;
+    std::set<int> excluded_nodes_;
     
     torch::jit::script::Module model_;
     torch::Device device_;
