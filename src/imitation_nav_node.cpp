@@ -61,7 +61,7 @@ void ImitationNav::ImageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg, msg->encoding);
         latest_image_ = cv_ptr->image.clone();
 
-        if(init_flag_ && autonomous_flag_){
+        if(init_flag_){
             topo_localizer_.initializeModel(latest_image_, use_observation_based_init_);
             topo_localizer_.setTransitionWindow(window_lower_, window_upper_);
             RCLCPP_INFO(this->get_logger(), "initialize model with observation_based_init: %s", 
