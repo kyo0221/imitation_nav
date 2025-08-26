@@ -76,7 +76,7 @@ void ImitationNav::ImageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 
 void ImitationNav::ImitationNavigation()
 {
-    if (!autonomous_flag_ || init_flag_ || latest_image_.empty()) return;
+    if (init_flag_ || latest_image_.empty()) return;
 
     try {
         cv::Mat cropped, imitation_img, topomap_img;
@@ -107,6 +107,8 @@ void ImitationNav::ImitationNavigation()
             cmd_pub_->publish(stop_msg);
             return;
         }
+
+        if(!autonomous_flag_) return;
 
         if (action == "roadside") command_idx = 0;
         else if (action == "straight") command_idx = 1;
