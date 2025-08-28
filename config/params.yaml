@@ -1,6 +1,6 @@
 imitation_nav_node:
   ros__parameters:
-    interval_ms: 100
+    interval_ms: 200
     localization_interval_ms: 500
     model_name: resnet_sim.pt
 

@@ -61,11 +61,25 @@ void ImitationNav::ImageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg, msg->encoding);
         latest_image_ = cv_ptr->image.clone();
 
+        // LSTM用画像シーケンス管理
+        int x_start = (latest_image_.cols - latest_image_.rows) / 2;
+        int y_start = (latest_image_.rows - latest_image_.rows) / 2;
+        cv::Rect crop_rect(x_start, y_start, latest_image_.rows, latest_image_.rows);
+        cv::Mat cropped = latest_image_(crop_rect).clone();
+        cv::Mat resized;
+        cv::resize(cropped, resized, cv::Size(224, 224));
+        
+        image_sequence_.push_back(resized);
+        if (image_sequence_.size() > sequence_length_) {
+            image_sequence_.pop_front();
+        }
+
         if(init_flag_){
             topo_localizer_.initializeModel(latest_image_, use_observation_based_init_);
             topo_localizer_.setTransitionWindow(window_lower_, window_upper_);
             RCLCPP_INFO(this->get_logger(), "initialize model with observation_based_init: %s", 
                        use_observation_based_init_ ? "true" : "false");
+            RCLCPP_INFO(this->get_logger(), "LSTM sequence length: %zu", sequence_length_);
             init_flag_=false;
         }
     } catch (const cv_bridge::Exception &e) {
@@ -119,20 +133,49 @@ void ImitationNav::ImitationNavigation()
             command_idx = 0;
         }
 
-        at::Tensor image_tensor = torch::from_blob(
-        imitation_img.data, 
-        {1, 224, 224, 3}, 
-        torch::kUInt8)
-        .permute({0, 3, 1, 2})
-        .clone()
-        .to(torch::kFloat32)
-        .div(255.0)
-        .to(torch::kCUDA);
+        // コマンドシーケンス管理
+        command_sequence_.push_back(command_idx);
+        if (command_sequence_.size() > sequence_length_) {
+            command_sequence_.pop_front();
+        }
 
-        at::Tensor cmd_tensor = torch::zeros({1, 5}, torch::dtype(torch::kFloat32).device(torch::kCUDA));
-        cmd_tensor[0][command_idx] = 1.0;
+        // LSTM推論のためのシーケンス長チェック
+        if (image_sequence_.size() < sequence_length_ || command_sequence_.size() < sequence_length_) {
+            RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
+                               "Waiting for sequence (images: %zu/%zu, commands: %zu/%zu)", 
+                               image_sequence_.size(), sequence_length_, 
+                               command_sequence_.size(), sequence_length_);
+            geometry_msgs::msg::Twist stop_msg;
+            stop_msg.linear.x = 0.0;
+            stop_msg.angular.z = 0.0;
+            cmd_pub_->publish(stop_msg);
+            return;
+        }
 
-        at::Tensor output = model_.forward({image_tensor, cmd_tensor}).toTensor();
+        // LSTMシーケンステンソル作成
+        std::vector<torch::Tensor> image_tensors;
+        std::vector<torch::Tensor> cmd_tensors;
+        
+        for (size_t i = 0; i < sequence_length_; ++i) {
+            at::Tensor img_tensor = torch::from_blob(
+                image_sequence_[i].data,
+                {224, 224, 3},
+                torch::kUInt8)
+                .permute({2, 0, 1})
+                .clone()
+                .to(torch::kFloat32)
+                .div(255.0);
+            image_tensors.push_back(img_tensor);
+            
+            at::Tensor cmd_tensor = torch::zeros({5}, torch::dtype(torch::kFloat32));
+            cmd_tensor[command_sequence_[i]] = 1.0;
+            cmd_tensors.push_back(cmd_tensor);
+        }
+        
+        at::Tensor image_sequence_tensor = torch::stack(image_tensors, 0).unsqueeze(0).to(torch::kCUDA);
+        at::Tensor cmd_sequence_tensor = torch::stack(cmd_tensors, 0).unsqueeze(0).to(torch::kCUDA);
+        
+        at::Tensor output = model_.forward({image_sequence_tensor, cmd_sequence_tensor}).toTensor();
 
         double predicted_angular = output.item<float>();
         predicted_angular = std::clamp(predicted_angular, -angular_max_, angular_max_);
@@ -141,6 +184,9 @@ void ImitationNav::ImitationNavigation()
         cmd_msg.linear.x = linear_max_;
         cmd_msg.angular.z = predicted_angular;
         cmd_pub_->publish(cmd_msg);
+        
+        RCLCPP_DEBUG(this->get_logger(), "LSTM inference: seq_len=%zu, action=%s, angular=%.3f", 
+                    image_sequence_.size(), action.c_str(), predicted_angular);
 
     } catch (const c10::Error &e) {
         RCLCPP_ERROR(this->get_logger(), "TorchScript inference error: %s", e.what());

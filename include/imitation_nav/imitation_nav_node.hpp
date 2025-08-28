@@ -10,6 +10,7 @@
 #include <cv_bridge/cv_bridge.h>
 #include <image_transport/image_transport.hpp>
 #include <opencv2/opencv.hpp>
+#include <deque>
 
 #include <imitation_nav/topo_localizer.hpp>
 
@@ -42,6 +43,9 @@ private:
   torch::jit::script::Module model_;
 
   cv::Mat latest_image_;
+  std::deque<cv::Mat> image_sequence_;
+  std::deque<int> command_sequence_;
+  const size_t sequence_length_ = 10;
 
   const int interval_ms;
   const int localization_interval_ms;
