@@ -29,7 +29,7 @@ topo_localizer_(
         "/autonomous", 10, std::bind(&ImitationNav::autonomousFlagCallback, this, std::placeholders::_1));
 
     image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
-        "/image_raw", 10, std::bind(&ImitationNav::ImageCallback, this, std::placeholders::_1));
+        "/zed/zed_node/left/image_rect_color", 10, std::bind(&ImitationNav::ImageCallback, this, std::placeholders::_1));
 
 
     cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
@@ -58,8 +58,10 @@ void ImitationNav::autonomousFlagCallback(const std_msgs::msg::Bool::SharedPtr m
 void ImitationNav::ImageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
     try {
+        cv::Mat rgb_image;
         cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg, msg->encoding);
-        latest_image_ = cv_ptr->image.clone();
+        cv::cvtColor(cv_ptr->image, rgb_image, cv::COLOR_BGRA2RGB);
+        latest_image_ = rgb_image.clone();
 
         if(init_flag_ && autonomous_flag_){
             topo_localizer_.initializeModel(latest_image_, use_observation_based_init_);
