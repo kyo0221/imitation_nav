@@ -2,6 +2,8 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/string.hpp>
@@ -12,6 +14,7 @@
 #include <opencv2/opencv.hpp>
 
 #include <imitation_nav/topo_localizer.hpp>
+#include <imitation_nav/pointcloud_processor.hpp>
 
 #include <imitation_nav/visibility_control.h>
 
@@ -30,12 +33,15 @@ public:
 private:
   void autonomousFlagCallback(const std_msgs::msg::Bool::SharedPtr msg);
   void ImageCallback(const sensor_msgs::msg::Image::SharedPtr msg);
+  void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
 
   void ImitationNavigation();
 
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr autonomous_flag_subscriber_;
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr laserscan_pub_;
 
   rclcpp::TimerBase::SharedPtr timer_;
 
@@ -55,8 +61,10 @@ private:
 
   bool autonomous_flag_=false;
   bool init_flag_=true;
-  
+  bool obstacle_detected_=false;
+
   imitation_nav::TopoLocalizer topo_localizer_;
+  std::shared_ptr<imitation_nav::PointCloudProcessor> pointcloud_processor_;
 };
 
 }  // namespace imitation_nav

@@ -31,11 +31,28 @@ topo_localizer_(
     image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
         "/zed/zed_node/left/image_rect_color", 10, std::bind(&ImitationNav::ImageCallback, this, std::placeholders::_1));
 
+    pointcloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
+        "/zed/zed_node/point_cloud/cloud_registered", 10, std::bind(&ImitationNav::pointCloudCallback, this, std::placeholders::_1));
 
     cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
+    laserscan_pub_ = this->create_publisher<sensor_msgs::msg::LaserScan>("/scan", 10);
 
     timer_ = this->create_wall_timer(std::chrono::milliseconds(interval_ms),
         std::bind(&ImitationNav::ImitationNavigation, this));
+
+    // PointCloudProcessorを初期化
+    double z_min = this->declare_parameter("z_min", -0.5);
+    double z_max = this->declare_parameter("z_max", 0.5);
+    double angle_min_deg = this->declare_parameter("angle_min_deg", -7.5);
+    double angle_max_deg = this->declare_parameter("angle_max_deg", 7.5);
+    double obstacle_distance_threshold = this->declare_parameter("obstacle_distance_threshold", 2.0);
+    double angle_increment_deg = this->declare_parameter("angle_increment_deg", 1.0);
+    double range_max = this->declare_parameter("range_max", 10.0);
+
+    pointcloud_processor_ = std::make_shared<imitation_nav::PointCloudProcessor>(
+        z_min, z_max, angle_min_deg, angle_max_deg,
+        obstacle_distance_threshold, angle_increment_deg, range_max
+    );
 
     try {
         std::string package_share = ament_index_cpp::get_package_share_directory("imitation_nav");
@@ -66,7 +83,7 @@ void ImitationNav::ImageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         if(init_flag_ && autonomous_flag_){
             topo_localizer_.initializeModel(latest_image_, use_observation_based_init_);
             topo_localizer_.setTransitionWindow(window_lower_, window_upper_);
-            RCLCPP_INFO(this->get_logger(), "initialize model with observation_based_init: %s", 
+            RCLCPP_INFO(this->get_logger(), "initialize model with observation_based_init: %s",
                        use_observation_based_init_ ? "true" : "false");
             init_flag_=false;
         }
@@ -75,6 +92,17 @@ void ImitationNav::ImageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
     }
 }
 
+void ImitationNav::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
+{
+    // PointCloud2をLaserScanに変換
+    sensor_msgs::msg::LaserScan scan_msg = pointcloud_processor_->convertToLaserScan(msg);
+
+    // LaserScanをパブリッシュ
+    laserscan_pub_->publish(scan_msg);
+
+    // 障害物検出
+    obstacle_detected_ = pointcloud_processor_->detectObstacle(scan_msg);
+}
 
 void ImitationNav::ImitationNavigation()
 {
@@ -125,8 +153,17 @@ void ImitationNav::ImitationNavigation()
         predicted_angular = std::clamp(predicted_angular, -angular_max_, angular_max_);
 
         geometry_msgs::msg::Twist cmd_msg;
-        cmd_msg.linear.x = linear_max_;
-        cmd_msg.angular.z = predicted_angular;
+
+        // 障害物が検出された場合は速度を0にする
+        if (obstacle_detected_) {
+            cmd_msg.linear.x = 0.0;
+            cmd_msg.angular.z = 0.0;
+            RCLCPP_WARN(this->get_logger(), "Obstacle detected! Stopping robot.");
+        } else {
+            cmd_msg.linear.x = linear_max_;
+            cmd_msg.angular.z = predicted_angular;
+        }
+
         cmd_pub_->publish(cmd_msg);
 
     } catch (const c10::Error &e) {
