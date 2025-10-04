@@ -54,6 +54,19 @@ topo_localizer_(
         obstacle_distance_threshold, angle_increment_deg, range_max
     );
 
+    // DynamicObstacleDetectorを初期化
+    double v_threshold = this->declare_parameter("v_threshold", 0.15);
+    double rigid_std_threshold = this->declare_parameter("rigid_std_threshold", 0.10);
+    double veg_z_var_threshold = this->declare_parameter("veg_z_var_threshold", 0.12);
+    int min_cluster_bins = this->declare_parameter("min_cluster_bins", 3);
+    double stop_duration = this->declare_parameter("stop_duration", 10.0);
+    double wait_duration = this->declare_parameter("wait_duration", 10.0);
+
+    detector_ = std::make_shared<imitation_nav::DynamicObstacleDetector>(
+        v_threshold, rigid_std_threshold, veg_z_var_threshold,
+        min_cluster_bins, stop_duration, wait_duration
+    );
+
     try {
         std::string package_share = ament_index_cpp::get_package_share_directory("imitation_nav");
         std::string model_path_ = package_share + "/weights/" + model_name;
@@ -94,14 +107,67 @@ void ImitationNav::ImageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 
 void ImitationNav::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
 {
-    // PointCloud2をLaserScanに変換
-    sensor_msgs::msg::LaserScan scan_msg = pointcloud_processor_->convertToLaserScan(msg);
+    // 高さ統計付きLaserScan生成
+    auto scan_with_stats = pointcloud_processor_->convertToLaserScanWithStats(msg);
 
     // LaserScanをパブリッシュ
-    laserscan_pub_->publish(scan_msg);
+    laserscan_pub_->publish(scan_with_stats.scan);
 
-    // 障害物検出
-    obstacle_detected_ = pointcloud_processor_->detectObstacle(scan_msg);
+    // 障害物検出（基本的な距離チェック）
+    bool obstacle = pointcloud_processor_->detectObstacle(scan_with_stats.scan);
+
+    auto state = detector_->getState();
+
+    switch (state) {
+        case DynamicObstacleDetector::State::NORMAL:
+            if (obstacle) {
+                // 障害物検出 → 停止開始
+                detector_->transitionToStopped();
+                stop_start_time_ = this->now();
+                RCLCPP_WARN(this->get_logger(), "Obstacle detected. Starting %.1fs observation.",
+                           detector_->getStopDuration());
+            }
+            obstacle_detected_ = obstacle;
+            break;
+
+        case DynamicObstacleDetector::State::STOPPED: {
+            // 停止中の観測を記録
+            detector_->recordScan(scan_with_stats);
+
+            auto elapsed = (this->now() - stop_start_time_).seconds();
+            if (elapsed >= detector_->getStopDuration()) {
+                // 停止期間経過 → 動的判定
+                bool is_dynamic = detector_->isDynamic();
+
+                if (is_dynamic) {
+                    // 動的障害物 → 待機状態へ
+                    detector_->transitionToWaiting();
+                    wait_start_time_ = this->now();
+                    RCLCPP_INFO(this->get_logger(), "Dynamic obstacle detected. Waiting %.1fs...",
+                               detector_->getWaitDuration());
+                } else {
+                    // 静的障害物 → 走行再開
+                    detector_->transitionToNormal();
+                    obstacle_detected_ = false;
+                    RCLCPP_INFO(this->get_logger(), "Static obstacle detected. Resuming navigation.");
+                }
+            }
+            obstacle_detected_ = true; // 停止維持
+            break;
+        }
+
+        case DynamicObstacleDetector::State::WAITING: {
+            auto elapsed = (this->now() - wait_start_time_).seconds();
+            if (elapsed >= detector_->getWaitDuration()) {
+                // 待機期間経過 → 再度停止状態で判定
+                detector_->transitionToStopped();
+                stop_start_time_ = this->now();
+                RCLCPP_INFO(this->get_logger(), "Re-checking obstacle status...");
+            }
+            obstacle_detected_ = true; // 停止維持
+            break;
+        }
+    }
 }
 
 void ImitationNav::ImitationNavigation()

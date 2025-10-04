@@ -10,3 +10,11 @@ imitation_nav_node:
     window_lower: -2
     window_upper: 5
     use_observation_based_init: true
+
+    # 動的障害物判定パラメータ
+    v_threshold: 0.15              # 動的速度閾値 [m/s]
+    rigid_std_threshold: 0.10      # 剛体判定（速度分散上限）
+    veg_z_var_threshold: 0.12      # 植生判定（高さ分散下限）
+    min_cluster_bins: 3            # 最小クラスタサイズ
+    stop_duration: 3.0            # 停止観測時間 [s]
+    wait_duration: 3.0            # 動的障害物待機時間 [s]

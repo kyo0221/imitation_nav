@@ -16,6 +16,7 @@ ament_auto_find_build_dependencies()
 ament_auto_add_library(imitation_nav
   src/topo_localizer.cpp
   src/pointcloud_processor.cpp
+  src/dynamic_obstacle_detector.cpp
 )
 
 target_link_libraries(imitation_nav

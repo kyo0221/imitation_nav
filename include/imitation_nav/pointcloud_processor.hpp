@@ -8,6 +8,8 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/filters/passthrough.h>
 
+#include "imitation_nav/dynamic_obstacle_detector.hpp"
+
 namespace imitation_nav
 {
 
@@ -26,6 +28,9 @@ public:
 
   // PointCloud2をLaserScanに変換
   sensor_msgs::msg::LaserScan convertToLaserScan(const sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg);
+
+  // PointCloud2をLaserScanに変換（高さ統計付き）
+  LaserScanWithHeightStats convertToLaserScanWithStats(const sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg);
 
   // 障害物検出（指定範囲内の最小距離が閾値以下かチェック）
   bool detectObstacle(const sensor_msgs::msg::LaserScan& scan);

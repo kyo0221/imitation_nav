@@ -15,6 +15,7 @@
 
 #include <imitation_nav/topo_localizer.hpp>
 #include <imitation_nav/pointcloud_processor.hpp>
+#include <imitation_nav/dynamic_obstacle_detector.hpp>
 
 #include <imitation_nav/visibility_control.h>
 
@@ -65,6 +66,10 @@ private:
 
   imitation_nav::TopoLocalizer topo_localizer_;
   std::shared_ptr<imitation_nav::PointCloudProcessor> pointcloud_processor_;
+  std::shared_ptr<imitation_nav::DynamicObstacleDetector> detector_;
+
+  rclcpp::Time stop_start_time_;
+  rclcpp::Time wait_start_time_;
 };
 
 }  // namespace imitation_nav
