@@ -13,8 +13,6 @@ ImitationNav::ImitationNav(const std::string &name_space, const rclcpp::NodeOpti
 interval_ms(get_parameter("interval_ms").as_int()),
 localization_interval_ms(get_parameter("localization_interval_ms").as_int()),
 model_name(get_parameter("model_name").as_string()),
-linear_max_(get_parameter("max_linear_vel").as_double()),
-angular_max_(get_parameter("max_angular_vel").as_double()),
 visualize_flag_(get_parameter("visualize_flag").as_bool()),
 window_lower_(get_parameter("window_lower").as_int()),
 window_upper_(get_parameter("window_upper").as_int()),
@@ -34,7 +32,7 @@ topo_localizer_(
     pointcloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
         "/zed/zed_node/point_cloud/cloud_registered", 10, std::bind(&ImitationNav::pointCloudCallback, this, std::placeholders::_1));
 
-    cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
+    path_pub_ = this->create_publisher<nav_msgs::msg::Path>("/predicted_path", 10);
     laserscan_pub_ = this->create_publisher<sensor_msgs::msg::LaserScan>("/scan", 10);
 
     timer_ = this->create_wall_timer(std::chrono::milliseconds(interval_ms),
@@ -149,22 +147,33 @@ void ImitationNav::ImitationNavigation()
 
         at::Tensor output = model_.forward({image_tensor, cmd_tensor}).toTensor();
 
-        double predicted_angular = output.item<float>();
-        predicted_angular = std::clamp(predicted_angular, -angular_max_, angular_max_);
+        // 60次元の出力を取得（30個の2D経路点）
+        auto output_cpu = output.to(torch::kCPU);
+        auto output_accessor = output_cpu.accessor<float, 2>();
 
-        geometry_msgs::msg::Twist cmd_msg;
+        nav_msgs::msg::Path path_msg;
+        path_msg.header.stamp = this->now();
+        path_msg.header.frame_id = "base_link";
 
-        // 障害物が検出された場合は速度を0にする
+        // 障害物が検出された場合は空のパスをパブリッシュ
         if (obstacle_detected_) {
-            cmd_msg.linear.x = 0.0;
-            cmd_msg.angular.z = 0.0;
-            RCLCPP_WARN(this->get_logger(), "Obstacle detected! Stopping robot.");
+            RCLCPP_WARN(this->get_logger(), "Obstacle detected! Publishing empty path.");
         } else {
-            cmd_msg.linear.x = linear_max_;
-            cmd_msg.angular.z = predicted_angular;
+            // 60次元から30個の経路点を復元
+            for (int i = 0; i < 30; ++i) {
+                geometry_msgs::msg::PoseStamped pose;
+                pose.header.stamp = this->now();
+                pose.header.frame_id = "base_link";
+                pose.pose.position.x = output_accessor[0][i * 2];
+                pose.pose.position.y = output_accessor[0][i * 2 + 1];
+                pose.pose.position.z = 0.0;
+                pose.pose.orientation.w = 1.0;
+
+                path_msg.poses.push_back(pose);
+            }
         }
 
-        cmd_pub_->publish(cmd_msg);
+        path_pub_->publish(path_msg);
 
     } catch (const c10::Error &e) {
         RCLCPP_ERROR(this->get_logger(), "TorchScript inference error: %s", e.what());
