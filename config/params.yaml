@@ -8,3 +8,14 @@ imitation_nav_node:
     window_lower: -2
     window_upper: 5
     use_observation_based_init: true
+
+    # ポテンシャル場パラメータ
+    safe_distance: 0.5
+    repulsive_gain: 0.3
+    max_adjustment: 0.5
+
+    # PurePursuitパラメータ
+    lookahead_distance: 1.0
+    target_linear_velocity: 0.8
+    max_angular_velocity: 1.57
+    goal_tolerance: 0.3

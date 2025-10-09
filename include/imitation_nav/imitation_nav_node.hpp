@@ -6,6 +6,7 @@
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/twist.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <torch/torch.h>
@@ -38,11 +39,20 @@ private:
 
   void ImitationNavigation();
 
+  nav_msgs::msg::Path adjustPathWithPotentialField(
+    const nav_msgs::msg::Path& raw_path,
+    const sensor_msgs::msg::LaserScan& scan);
+
+  geometry_msgs::msg::Twist computePurePursuitControl(
+    const nav_msgs::msg::Path& path);
+
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr autonomous_flag_subscriber_;
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
+  rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_raw_pub_;
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr laserscan_pub_;
+  rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
 
   rclcpp::TimerBase::SharedPtr timer_;
 
@@ -61,6 +71,17 @@ private:
   bool autonomous_flag_=false;
   bool init_flag_=true;
   bool obstacle_detected_=false;
+
+  sensor_msgs::msg::LaserScan latest_scan_;
+
+  double safe_distance_;
+  double repulsive_gain_;
+  double max_adjustment_;
+
+  double lookahead_distance_;
+  double target_linear_velocity_;
+  double max_angular_velocity_;
+  double goal_tolerance_;
 
   imitation_nav::TopoLocalizer topo_localizer_;
   std::shared_ptr<imitation_nav::PointCloudProcessor> pointcloud_processor_;

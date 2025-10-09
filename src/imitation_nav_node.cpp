@@ -33,7 +33,9 @@ topo_localizer_(
         "/zed/zed_node/point_cloud/cloud_registered", 10, std::bind(&ImitationNav::pointCloudCallback, this, std::placeholders::_1));
 
     path_pub_ = this->create_publisher<nav_msgs::msg::Path>("/predicted_path", 10);
+    path_raw_pub_ = this->create_publisher<nav_msgs::msg::Path>("/predicted_path_raw", 10);
     laserscan_pub_ = this->create_publisher<sensor_msgs::msg::LaserScan>("/scan", 10);
+    cmd_vel_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
 
     timer_ = this->create_wall_timer(std::chrono::milliseconds(interval_ms),
         std::bind(&ImitationNav::ImitationNavigation, this));
@@ -51,6 +53,17 @@ topo_localizer_(
         z_min, z_max, angle_min_deg, angle_max_deg,
         obstacle_distance_threshold, angle_increment_deg, range_max
     );
+
+    // ポテンシャル場パラメータの初期化
+    safe_distance_ = this->declare_parameter("safe_distance", 0.5);
+    repulsive_gain_ = this->declare_parameter("repulsive_gain", 0.3);
+    max_adjustment_ = this->declare_parameter("max_adjustment", 0.5);
+
+    // PurePursuitパラメータの初期化
+    lookahead_distance_ = this->declare_parameter("lookahead_distance", 1.0);
+    target_linear_velocity_ = this->declare_parameter("target_linear_velocity", 0.5);
+    max_angular_velocity_ = this->declare_parameter("max_angular_velocity", 1.0);
+    goal_tolerance_ = this->declare_parameter("goal_tolerance", 0.3);
 
     try {
         std::string package_share = ament_index_cpp::get_package_share_directory("imitation_nav");
@@ -94,12 +107,136 @@ void ImitationNav::pointCloudCallback(const sensor_msgs::msg::PointCloud2::Share
 {
     // PointCloud2をLaserScanに変換
     sensor_msgs::msg::LaserScan scan_msg = pointcloud_processor_->convertToLaserScan(msg);
-
-    // LaserScanをパブリッシュ
     laserscan_pub_->publish(scan_msg);
+    latest_scan_ = scan_msg;
 
     // 障害物検出
     obstacle_detected_ = pointcloud_processor_->detectObstacle(scan_msg);
+}
+
+nav_msgs::msg::Path ImitationNav::adjustPathWithPotentialField(
+    const nav_msgs::msg::Path& raw_path,
+    const sensor_msgs::msg::LaserScan& scan)
+{
+    nav_msgs::msg::Path adjusted_path = raw_path;
+
+    // LaserScanから障害物点群を抽出（base_link座標系）
+    std::vector<std::pair<double, double>> obstacle_points;
+    for (size_t i = 0; i < scan.ranges.size(); ++i) {
+        float range = scan.ranges[i];
+        if (std::isfinite(range) && range > scan.range_min && range < scan.range_max) {
+            double angle = scan.angle_min + i * scan.angle_increment;
+            double x = range * std::cos(angle);
+            double y = range * std::sin(angle);
+            obstacle_points.push_back({x, y});
+        }
+    }
+
+    // 各pathポイントに対して反発力を計算
+    for (auto& pose : adjusted_path.poses) {
+        double px = pose.pose.position.x;
+        double py = pose.pose.position.y;
+
+        double total_fx = 0.0;
+        double total_fy = 0.0;
+
+        // 各障害物からの反発力を計算
+        for (const auto& obs : obstacle_points) {
+            double dx = px - obs.first;
+            double dy = py - obs.second;
+            double distance = std::sqrt(dx * dx + dy * dy);
+
+            // 安全距離内の障害物のみ考慮
+            if (distance < safe_distance_ && distance > 0.01) {
+                // 反発力の大きさ（距離が近いほど強い）
+                double force_magnitude = repulsive_gain_ * (1.0 / distance - 1.0 / safe_distance_) / (distance * distance);
+
+                // 正規化された方向ベクトル
+                double nx = dx / distance;
+                double ny = dy / distance;
+
+                total_fx += force_magnitude * nx;
+                total_fy += force_magnitude * ny;
+            }
+        }
+
+        // 調整量を制限（パスの形状を大きく崩さない）
+        double adjustment_magnitude = std::sqrt(total_fx * total_fx + total_fy * total_fy);
+        if (adjustment_magnitude > max_adjustment_) {
+            total_fx = total_fx / adjustment_magnitude * max_adjustment_;
+            total_fy = total_fy / adjustment_magnitude * max_adjustment_;
+        }
+
+        // 位置を調整
+        pose.pose.position.x += total_fx;
+        pose.pose.position.y += total_fy;
+    }
+
+    return adjusted_path;
+}
+
+geometry_msgs::msg::Twist ImitationNav::computePurePursuitControl(
+    const nav_msgs::msg::Path& path)
+{
+    geometry_msgs::msg::Twist cmd_vel;
+    cmd_vel.linear.x = 0.0;
+    cmd_vel.angular.z = 0.0;
+
+    if (path.poses.empty()) {
+        return cmd_vel;
+    }
+
+    // 現在位置はbase_linkの原点 (0, 0)
+    // Look-ahead距離の目標点を探す
+    double closest_dist = std::numeric_limits<double>::max();
+    size_t lookahead_idx = 0;
+    bool found_lookahead = false;
+
+    for (size_t i = 0; i < path.poses.size(); ++i) {
+        double px = path.poses[i].pose.position.x;
+        double py = path.poses[i].pose.position.y;
+        double dist = std::sqrt(px * px + py * py);
+
+        // Look-ahead距離に最も近い点を探す
+        if (std::abs(dist - lookahead_distance_) < closest_dist) {
+            closest_dist = std::abs(dist - lookahead_distance_);
+            lookahead_idx = i;
+            found_lookahead = true;
+        }
+    }
+
+    if (!found_lookahead) {
+        // 経路が見つからない場合は停止
+        return cmd_vel;
+    }
+
+    // 目標点の座標
+    double goal_x = path.poses[lookahead_idx].pose.position.x;
+    double goal_y = path.poses[lookahead_idx].pose.position.y;
+    double goal_dist = std::sqrt(goal_x * goal_x + goal_y * goal_y);
+
+    // ゴール到達判定
+    if (goal_dist < goal_tolerance_) {
+        RCLCPP_INFO(this->get_logger(), "Goal reached!");
+        return cmd_vel;
+    }
+
+    // 目標点への角度
+    double theta = std::atan2(goal_y, goal_x);
+
+    // PurePursuitの角速度計算
+    // ω = 2 * v * sin(θ) / L
+    double angular_vel = 2.0 * target_linear_velocity_ * std::sin(theta) / lookahead_distance_;
+
+    // 角速度を制限
+    angular_vel = std::max(-max_angular_velocity_,
+                          std::min(max_angular_velocity_, angular_vel));
+
+    // 速度指令
+    cmd_vel.linear.x = target_linear_velocity_;
+    cmd_vel.angular.z = angular_vel;
+
+    return cmd_vel;
 }
 
 void ImitationNav::ImitationNavigation()
@@ -147,7 +284,6 @@ void ImitationNav::ImitationNavigation()
 
         at::Tensor output = model_.forward({image_tensor, cmd_tensor}).toTensor();
 
-        // 60次元の出力を取得（30個の2D経路点）
         auto output_cpu = output.to(torch::kCPU);
         auto output_accessor = output_cpu.accessor<float, 2>();
 
@@ -155,25 +291,35 @@ void ImitationNav::ImitationNavigation()
         path_msg.header.stamp = this->now();
         path_msg.header.frame_id = "base_link";
 
-        // 障害物が検出された場合は空のパスをパブリッシュ
-        if (obstacle_detected_) {
-            RCLCPP_WARN(this->get_logger(), "Obstacle detected! Publishing empty path.");
-        } else {
-            // 60次元から30個の経路点を復元
-            for (int i = 0; i < 30; ++i) {
-                geometry_msgs::msg::PoseStamped pose;
-                pose.header.stamp = this->now();
-                pose.header.frame_id = "base_link";
-                pose.pose.position.x = output_accessor[0][i * 2];
-                pose.pose.position.y = output_accessor[0][i * 2 + 1];
-                pose.pose.position.z = 0.0;
-                pose.pose.orientation.w = 1.0;
+        for (int i = 0; i < 30; ++i) {
+            geometry_msgs::msg::PoseStamped pose;
+            pose.header.stamp = this->now();
+            pose.header.frame_id = "base_link";
+            pose.pose.position.x = output_accessor[0][i * 2];
+            pose.pose.position.y = output_accessor[0][i * 2 + 1];
+            pose.pose.position.z = 0.0;
+            pose.pose.orientation.w = 1.0;
 
-                path_msg.poses.push_back(pose);
-            }
+            path_msg.poses.push_back(pose);
         }
 
-        path_pub_->publish(path_msg);
+        // path_rawとして元のパスを出版
+        nav_msgs::msg::Path path_raw_msg = path_msg;
+        path_raw_pub_->publish(path_raw_msg);
+
+        // 障害物検出時はポテンシャル場で調整
+        nav_msgs::msg::Path adjusted_path_msg = path_msg;
+        if (obstacle_detected_ && !latest_scan_.ranges.empty()) {
+            adjusted_path_msg = adjustPathWithPotentialField(path_msg, latest_scan_);
+            RCLCPP_INFO(this->get_logger(), "Path adjusted using potential field");
+        }
+
+        // 調整後のパスを出版
+        path_pub_->publish(adjusted_path_msg);
+
+        // PurePursuitで速度指令を計算
+        geometry_msgs::msg::Twist cmd_vel = computePurePursuitControl(adjusted_path_msg);
+        cmd_vel_pub_->publish(cmd_vel);
 
     } catch (const c10::Error &e) {
         RCLCPP_ERROR(this->get_logger(), "TorchScript inference error: %s", e.what());
