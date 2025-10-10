@@ -30,6 +30,12 @@ public:
   // 障害物検出（指定範囲内の最小距離が閾値以下かチェック）
   bool detectObstacle(const sensor_msgs::msg::LaserScan& scan);
 
+  // 前方の最小距離を計算（collision monitor用）
+  double computeMinFrontDistance(const sensor_msgs::msg::LaserScan& scan);
+
+  // 距離に基づく速度スケーリング係数を計算（0.0～1.0）
+  static double computeVelocityScale(double min_distance);
+
 private:
   double z_min_;
   double z_max_;

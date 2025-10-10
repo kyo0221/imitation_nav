@@ -41,6 +41,7 @@ sensor_msgs::msg::LaserScan PointCloudProcessor::convertToLaserScan(
 
     sensor_msgs::msg::LaserScan scan_msg;
     scan_msg.header = cloud_msg->header;
+    scan_msg.header.frame_id = "base_link";
 
     // 角度範囲を設定（-180度から180度）
     double angle_min_rad = -M_PI;
@@ -109,6 +110,49 @@ bool PointCloudProcessor::detectObstacle(const sensor_msgs::msg::LaserScan& scan
     }
 
     return false;
+}
+
+double PointCloudProcessor::computeMinFrontDistance(const sensor_msgs::msg::LaserScan& scan)
+{
+    double angle_min_check_rad = angle_min_deg_ * M_PI / 180.0;
+    double angle_max_check_rad = angle_max_deg_ * M_PI / 180.0;
+
+    double min_distance = std::numeric_limits<double>::infinity();
+
+    for (size_t i = 0; i < scan.ranges.size(); ++i)
+    {
+        double angle = scan.angle_min + i * scan.angle_increment;
+
+        // 指定角度範囲内かチェック
+        if (angle >= angle_min_check_rad && angle <= angle_max_check_rad)
+        {
+            if (std::isfinite(scan.ranges[i]) && scan.ranges[i] < min_distance) {
+                min_distance = scan.ranges[i];
+            }
+        }
+    }
+
+    return min_distance;
+}
+
+double PointCloudProcessor::computeVelocityScale(double min_distance)
+{
+    // 距離に応じた速度スケーリング
+    // 5m以上: 100%、4-5m: 80%、3-4m: 60%、2-3m: 40%、1-2m: 20%、1m以下: 0%
+
+    if (min_distance >= 5.0) {
+        return 1.0;
+    } else if (min_distance >= 4.0) {
+        return 0.8;
+    } else if (min_distance >= 3.0) {
+        return 0.6;
+    } else if (min_distance >= 2.0) {
+        return 0.4;
+    } else if (min_distance >= 1.0) {
+        return 0.2;
+    } else {
+        return 0.0;  // 停止
+    }
 }
 
 }  // namespace imitation_nav

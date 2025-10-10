@@ -9,13 +9,12 @@ imitation_nav_node:
     window_upper: 5
     use_observation_based_init: true
 
-    # ポテンシャル場パラメータ
-    safe_distance: 0.5
-    repulsive_gain: 0.3
-    max_adjustment: 0.5
-
     # PurePursuitパラメータ
     lookahead_distance: 1.0
     target_linear_velocity: 0.8
     max_angular_velocity: 1.57
     goal_tolerance: 0.3
+
+    # Collision Monitorパラメータ
+    # angle_min_deg, angle_max_deg: 前方監視範囲（デフォルト: -7.5～7.5度）
+    # 速度プロファイル: 5m以上=100%, 4-5m=80%, 3-4m=60%, 2-3m=40%, 1-2m=20%, 1m以下=0%（停止）

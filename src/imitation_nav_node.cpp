@@ -32,8 +32,7 @@ topo_localizer_(
     pointcloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
         "/zed/zed_node/point_cloud/cloud_registered", 10, std::bind(&ImitationNav::pointCloudCallback, this, std::placeholders::_1));
 
-    path_pub_ = this->create_publisher<nav_msgs::msg::Path>("/predicted_path", 10);
-    path_raw_pub_ = this->create_publisher<nav_msgs::msg::Path>("/predicted_path_raw", 10);
+    path_pub_ = this->create_publisher<nav_msgs::msg::Path>("/path", 10);
     laserscan_pub_ = this->create_publisher<sensor_msgs::msg::LaserScan>("/scan", 10);
     cmd_vel_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
 
@@ -53,11 +52,6 @@ topo_localizer_(
         z_min, z_max, angle_min_deg, angle_max_deg,
         obstacle_distance_threshold, angle_increment_deg, range_max
     );
-
-    // ポテンシャル場パラメータの初期化
-    safe_distance_ = this->declare_parameter("safe_distance", 0.5);
-    repulsive_gain_ = this->declare_parameter("repulsive_gain", 0.3);
-    max_adjustment_ = this->declare_parameter("max_adjustment", 0.5);
 
     // PurePursuitパラメータの初期化
     lookahead_distance_ = this->declare_parameter("lookahead_distance", 1.0);
@@ -110,69 +104,11 @@ void ImitationNav::pointCloudCallback(const sensor_msgs::msg::PointCloud2::Share
     laserscan_pub_->publish(scan_msg);
     latest_scan_ = scan_msg;
 
+    // 前方の最小距離を計算（collision monitor用）
+    min_front_distance_ = pointcloud_processor_->computeMinFrontDistance(scan_msg);
+
     // 障害物検出
     obstacle_detected_ = pointcloud_processor_->detectObstacle(scan_msg);
-}
-
-nav_msgs::msg::Path ImitationNav::adjustPathWithPotentialField(
-    const nav_msgs::msg::Path& raw_path,
-    const sensor_msgs::msg::LaserScan& scan)
-{
-    nav_msgs::msg::Path adjusted_path = raw_path;
-
-    // LaserScanから障害物点群を抽出（base_link座標系）
-    std::vector<std::pair<double, double>> obstacle_points;
-    for (size_t i = 0; i < scan.ranges.size(); ++i) {
-        float range = scan.ranges[i];
-        if (std::isfinite(range) && range > scan.range_min && range < scan.range_max) {
-            double angle = scan.angle_min + i * scan.angle_increment;
-            double x = range * std::cos(angle);
-            double y = range * std::sin(angle);
-            obstacle_points.push_back({x, y});
-        }
-    }
-
-    // 各pathポイントに対して反発力を計算
-    for (auto& pose : adjusted_path.poses) {
-        double px = pose.pose.position.x;
-        double py = pose.pose.position.y;
-
-        double total_fx = 0.0;
-        double total_fy = 0.0;
-
-        // 各障害物からの反発力を計算
-        for (const auto& obs : obstacle_points) {
-            double dx = px - obs.first;
-            double dy = py - obs.second;
-            double distance = std::sqrt(dx * dx + dy * dy);
-
-            // 安全距離内の障害物のみ考慮
-            if (distance < safe_distance_ && distance > 0.01) {
-                // 反発力の大きさ（距離が近いほど強い）
-                double force_magnitude = repulsive_gain_ * (1.0 / distance - 1.0 / safe_distance_) / (distance * distance);
-
-                // 正規化された方向ベクトル
-                double nx = dx / distance;
-                double ny = dy / distance;
-
-                total_fx += force_magnitude * nx;
-                total_fy += force_magnitude * ny;
-            }
-        }
-
-        // 調整量を制限（パスの形状を大きく崩さない）
-        double adjustment_magnitude = std::sqrt(total_fx * total_fx + total_fy * total_fy);
-        if (adjustment_magnitude > max_adjustment_) {
-            total_fx = total_fx / adjustment_magnitude * max_adjustment_;
-            total_fy = total_fy / adjustment_magnitude * max_adjustment_;
-        }
-
-        // 位置を調整
-        pose.pose.position.x += total_fx;
-        pose.pose.position.y += total_fy;
-    }
-
-    return adjusted_path;
 }
 
 geometry_msgs::msg::Twist ImitationNav::computePurePursuitControl(
@@ -186,8 +122,6 @@ geometry_msgs::msg::Twist ImitationNav::computePurePursuitControl(
         return cmd_vel;
     }
 
-    // 現在位置はbase_linkの原点 (0, 0)
-    // Look-ahead距離の目標点を探す
     double closest_dist = std::numeric_limits<double>::max();
     size_t lookahead_idx = 0;
     bool found_lookahead = false;
@@ -232,9 +166,16 @@ geometry_msgs::msg::Twist ImitationNav::computePurePursuitControl(
     angular_vel = std::max(-max_angular_velocity_,
                           std::min(max_angular_velocity_, angular_vel));
 
+    // Collision monitorによる速度スケーリング
+    double velocity_scale = PointCloudProcessor::computeVelocityScale(min_front_distance_);
+
     // 速度指令
-    cmd_vel.linear.x = target_linear_velocity_;
+    cmd_vel.linear.x = target_linear_velocity_ * velocity_scale;
     cmd_vel.angular.z = angular_vel;
+
+    if (velocity_scale == 0.0) {
+        RCLCPP_WARN(this->get_logger(), "Collision Monitor: Obstacle within 1m (%.2fm) - STOPPED", min_front_distance_);
+    }
 
     return cmd_vel;
 }
@@ -303,22 +244,11 @@ void ImitationNav::ImitationNavigation()
             path_msg.poses.push_back(pose);
         }
 
-        // path_rawとして元のパスを出版
-        nav_msgs::msg::Path path_raw_msg = path_msg;
-        path_raw_pub_->publish(path_raw_msg);
-
-        // 障害物検出時はポテンシャル場で調整
-        nav_msgs::msg::Path adjusted_path_msg = path_msg;
-        if (obstacle_detected_ && !latest_scan_.ranges.empty()) {
-            adjusted_path_msg = adjustPathWithPotentialField(path_msg, latest_scan_);
-            RCLCPP_INFO(this->get_logger(), "Path adjusted using potential field");
-        }
-
-        // 調整後のパスを出版
-        path_pub_->publish(adjusted_path_msg);
+        // パスを出版
+        path_pub_->publish(path_msg);
 
         // PurePursuitで速度指令を計算
-        geometry_msgs::msg::Twist cmd_vel = computePurePursuitControl(adjusted_path_msg);
+        geometry_msgs::msg::Twist cmd_vel = computePurePursuitControl(path_msg);
         cmd_vel_pub_->publish(cmd_vel);
 
     } catch (const c10::Error &e) {

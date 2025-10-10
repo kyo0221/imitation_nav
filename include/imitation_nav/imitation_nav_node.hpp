@@ -39,10 +39,6 @@ private:
 
   void ImitationNavigation();
 
-  nav_msgs::msg::Path adjustPathWithPotentialField(
-    const nav_msgs::msg::Path& raw_path,
-    const sensor_msgs::msg::LaserScan& scan);
-
   geometry_msgs::msg::Twist computePurePursuitControl(
     const nav_msgs::msg::Path& path);
 
@@ -50,7 +46,6 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
-  rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_raw_pub_;
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr laserscan_pub_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
 
@@ -72,11 +67,8 @@ private:
   bool init_flag_=true;
   bool obstacle_detected_=false;
 
+  double min_front_distance_ = std::numeric_limits<double>::infinity();
   sensor_msgs::msg::LaserScan latest_scan_;
-
-  double safe_distance_;
-  double repulsive_gain_;
-  double max_adjustment_;
 
   double lookahead_distance_;
   double target_linear_velocity_;
