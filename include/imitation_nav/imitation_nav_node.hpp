@@ -42,6 +42,8 @@ private:
   geometry_msgs::msg::Twist computePurePursuitControl(
     const nav_msgs::msg::Path& path);
 
+  std::optional<cv::Point> robotPointToPixel(double x_robot, double y_robot);
+
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr autonomous_flag_subscriber_;
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;

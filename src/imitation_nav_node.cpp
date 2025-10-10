@@ -6,6 +6,17 @@
 namespace imitation_nav
 {
 
+// ZED camera intrinsics for 640x360 resolution (scaled from 1280x720)
+struct CameraIntrinsics {
+    static constexpr double fx = 554.3827;     // Focal length in x direction (pixels)
+    static constexpr double fy = 554.3827;     // Focal length in y direction (pixels)
+    static constexpr double cx = 320.0;        // Principal point x coordinate (pixels)
+    static constexpr double cy = 180.0;        // Principal point y coordinate (pixels)
+    static constexpr double camera_height = 0.54;  // Camera height above ground [m]
+    static constexpr int width = 640;
+    static constexpr int height = 360;
+};
+
 ImitationNav::ImitationNav(const rclcpp::NodeOptions &options) : ImitationNav("", options) {}
 
 ImitationNav::ImitationNav(const std::string &name_space, const rclcpp::NodeOptions &options)
@@ -180,6 +191,51 @@ geometry_msgs::msg::Twist ImitationNav::computePurePursuitControl(
     return cmd_vel;
 }
 
+std::optional<cv::Point> ImitationNav::robotPointToPixel(double x_robot, double y_robot)
+{
+    // Robot coords -> Camera coords (ROS standard: X=right, Y=down, Z=forward)
+    // Robot: x=forward, y=left
+    // Camera: X=right, Y=down, Z=forward (optical axis)
+    double X_cam = -y_robot;  // left -> right (negate)
+    double Y_cam = CameraIntrinsics::camera_height;  // camera height above ground (down is positive Y)
+    double Z_cam = x_robot;   // forward
+
+    // Check if point is in front of camera
+    if (Z_cam <= 0.0) {
+        return std::nullopt;
+    }
+
+    // 3D point in camera coordinate system
+    std::vector<cv::Point3f> object_points = {cv::Point3f(X_cam, Y_cam, Z_cam)};
+
+    // Camera intrinsic matrix K
+    cv::Mat K = (cv::Mat_<double>(3, 3) <<
+        CameraIntrinsics::fx, 0.0, CameraIntrinsics::cx,
+        0.0, CameraIntrinsics::fy, CameraIntrinsics::cy,
+        0.0, 0.0, 1.0);
+
+    // Rotation and translation vectors (identity: camera coords -> camera coords)
+    cv::Mat rvec = cv::Mat::zeros(3, 1, CV_64F);  // Rodrigues rotation vector (no rotation)
+    cv::Mat tvec = cv::Mat::zeros(3, 1, CV_64F);  // Translation vector (no translation)
+
+    // Distortion coefficients (plumb_bob model, all zeros)
+    cv::Mat dist = cv::Mat::zeros(5, 1, CV_64F);
+
+    // Project 3D point to 2D image plane
+    std::vector<cv::Point2f> image_points;
+    cv::projectPoints(object_points, rvec, tvec, K, dist, image_points);
+
+    int u = static_cast<int>(image_points[0].x);
+    int v = static_cast<int>(image_points[0].y);
+
+    // Check if within image bounds
+    if (u >= 0 && u < CameraIntrinsics::width && v >= 0 && v < CameraIntrinsics::height) {
+        return cv::Point(u, v);
+    }
+
+    return std::nullopt;
+}
+
 void ImitationNav::ImitationNavigation()
 {
     if (!autonomous_flag_ || init_flag_ || latest_image_.empty()) return;
@@ -243,6 +299,37 @@ void ImitationNav::ImitationNavigation()
 
             path_msg.poses.push_back(pose);
         }
+
+        // Visualize path on image
+        cv::Mat visualization_image = latest_image_.clone();
+        std::vector<cv::Point> pixel_points;
+
+        for (const auto& pose : path_msg.poses) {
+            double x_robot = pose.pose.position.x;
+            double y_robot = pose.pose.position.y;
+
+            auto pixel = robotPointToPixel(x_robot, y_robot);
+            if (pixel.has_value()) {
+                pixel_points.push_back(pixel.value());
+            }
+        }
+
+        // Draw path as green line
+        if (pixel_points.size() > 1) {
+            for (size_t i = 0; i < pixel_points.size() - 1; ++i) {
+                cv::line(visualization_image, pixel_points[i], pixel_points[i + 1],
+                         cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
+            }
+
+            // Draw circles at path points
+            for (const auto& pixel : pixel_points) {
+                cv::circle(visualization_image, pixel, 3, cv::Scalar(0, 255, 0), -1);
+            }
+        }
+
+        // Display visualization
+        cv::imshow("Path Visualization", visualization_image);
+        cv::waitKey(1);
 
         // パスを出版
         path_pub_->publish(path_msg);
