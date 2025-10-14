@@ -14,6 +14,7 @@
 #include <cv_bridge/cv_bridge.h>
 #include <image_transport/image_transport.hpp>
 #include <opencv2/opencv.hpp>
+#include <Eigen/Dense>
 
 #include <imitation_nav/topo_localizer.hpp>
 #include <imitation_nav/pointcloud_processor.hpp>
@@ -43,6 +44,11 @@ private:
     const nav_msgs::msg::Path& path);
 
   std::optional<cv::Point> robotPointToPixel(double x_robot, double y_robot);
+
+  // Cubic spline interpolation for path smoothing
+  std::vector<std::pair<double, double>> interpolatePath(
+    const std::vector<std::pair<double, double>>& original_points,
+    int num_interpolated_points = 100);
 
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr autonomous_flag_subscriber_;
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;

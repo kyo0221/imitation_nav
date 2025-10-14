@@ -236,6 +236,110 @@ std::optional<cv::Point> ImitationNav::robotPointToPixel(double x_robot, double 
     return std::nullopt;
 }
 
+std::vector<std::pair<double, double>> ImitationNav::interpolatePath(
+    const std::vector<std::pair<double, double>>& original_points,
+    int num_interpolated_points)
+{
+    std::vector<std::pair<double, double>> result;
+
+    // Add origin (0, 0) as the first point
+    std::vector<std::pair<double, double>> points_with_origin;
+    points_with_origin.push_back({0.0, 0.0});
+    for (const auto& pt : original_points) {
+        points_with_origin.push_back(pt);
+    }
+
+    int n = points_with_origin.size();
+    if (n < 2) {
+        RCLCPP_WARN(this->get_logger(), "Not enough points for interpolation");
+        return result;
+    }
+
+    // Calculate cumulative distances
+    std::vector<double> distances(n);
+    distances[0] = 0.0;
+    for (int i = 1; i < n; ++i) {
+        double dx = points_with_origin[i].first - points_with_origin[i-1].first;
+        double dy = points_with_origin[i].second - points_with_origin[i-1].second;
+        distances[i] = distances[i-1] + std::sqrt(dx * dx + dy * dy);
+    }
+
+    if (distances[n-1] < 1e-6) {
+        RCLCPP_WARN(this->get_logger(), "Path has zero length");
+        return result;
+    }
+
+    // Natural cubic spline interpolation using Eigen
+    // Solve for spline coefficients separately for x and y
+    auto computeSplineCoefficients = [&](const std::vector<double>& values) -> Eigen::VectorXd {
+        Eigen::MatrixXd A = Eigen::MatrixXd::Zero(n, n);
+        Eigen::VectorXd b = Eigen::VectorXd::Zero(n);
+
+        // Natural spline boundary conditions: second derivative = 0 at endpoints
+        A(0, 0) = 1.0;
+        A(n-1, n-1) = 1.0;
+
+        // Interior points
+        for (int i = 1; i < n-1; ++i) {
+            double h_i = distances[i] - distances[i-1];
+            double h_i1 = distances[i+1] - distances[i];
+
+            A(i, i-1) = h_i;
+            A(i, i) = 2.0 * (h_i + h_i1);
+            A(i, i+1) = h_i1;
+
+            b(i) = 3.0 * ((values[i+1] - values[i]) / h_i1 - (values[i] - values[i-1]) / h_i);
+        }
+
+        return A.colPivHouseholderQr().solve(b);
+    };
+
+    // Extract x and y coordinates
+    std::vector<double> x_vals(n), y_vals(n);
+    for (int i = 0; i < n; ++i) {
+        x_vals[i] = points_with_origin[i].first;
+        y_vals[i] = points_with_origin[i].second;
+    }
+
+    Eigen::VectorXd x_coeffs = computeSplineCoefficients(x_vals);
+    Eigen::VectorXd y_coeffs = computeSplineCoefficients(y_vals);
+
+    // Generate interpolated points
+    for (int idx = 0; idx < num_interpolated_points; ++idx) {
+        double t = distances[n-1] * idx / (num_interpolated_points - 1);
+
+        // Find the segment
+        int i = 0;
+        for (i = 0; i < n-1; ++i) {
+            if (t <= distances[i+1]) break;
+        }
+        i = std::min(i, n-2);
+
+        double h = distances[i+1] - distances[i];
+        double dt = (t - distances[i]) / h;
+
+        // Hermite basis functions
+        double h00 = 2*dt*dt*dt - 3*dt*dt + 1;
+        double h10 = dt*dt*dt - 2*dt*dt + dt;
+        double h01 = -2*dt*dt*dt + 3*dt*dt;
+        double h11 = dt*dt*dt - dt*dt;
+
+        double m_i_x = x_coeffs(i);
+        double m_i1_x = x_coeffs(i+1);
+        double x_interp = h00 * x_vals[i] + h10 * h * m_i_x +
+                         h01 * x_vals[i+1] + h11 * h * m_i1_x;
+
+        double m_i_y = y_coeffs(i);
+        double m_i1_y = y_coeffs(i+1);
+        double y_interp = h00 * y_vals[i] + h10 * h * m_i_y +
+                         h01 * y_vals[i+1] + h11 * h * m_i1_y;
+
+        result.push_back({x_interp, y_interp});
+    }
+
+    return result;
+}
+
 void ImitationNav::ImitationNavigation()
 {
     if (!autonomous_flag_ || init_flag_ || latest_image_.empty()) return;
@@ -288,12 +392,25 @@ void ImitationNav::ImitationNavigation()
         path_msg.header.stamp = this->now();
         path_msg.header.frame_id = "base_link";
 
-        for (int i = 0; i < 30; ++i) {
+        // Store original 6 predicted points
+        std::vector<std::pair<double, double>> original_points;
+        for (int i = 0; i < 6; ++i) {
+            double x = output_accessor[0][i * 2];
+            double y = output_accessor[0][i * 2 + 1];
+            original_points.push_back({x, y});
+        }
+
+        // Interpolate path using cubic spline (including origin)
+        std::vector<std::pair<double, double>> interpolated_points =
+            interpolatePath(original_points, 100);
+
+        // Create path message with interpolated points
+        for (const auto& pt : interpolated_points) {
             geometry_msgs::msg::PoseStamped pose;
             pose.header.stamp = this->now();
             pose.header.frame_id = "base_link";
-            pose.pose.position.x = output_accessor[0][i * 2];
-            pose.pose.position.y = output_accessor[0][i * 2 + 1];
+            pose.pose.position.x = pt.first;
+            pose.pose.position.y = pt.second;
             pose.pose.position.z = 0.0;
             pose.pose.orientation.w = 1.0;
 
@@ -302,29 +419,43 @@ void ImitationNav::ImitationNavigation()
 
         // Visualize path on image
         cv::Mat visualization_image = latest_image_.clone();
-        std::vector<cv::Point> pixel_points;
+        std::vector<cv::Point> original_pixel_points;
+        std::vector<cv::Point> interpolated_pixel_points;
 
-        for (const auto& pose : path_msg.poses) {
-            double x_robot = pose.pose.position.x;
-            double y_robot = pose.pose.position.y;
-
-            auto pixel = robotPointToPixel(x_robot, y_robot);
+        // Project original points to image
+        for (const auto& pt : original_points) {
+            auto pixel = robotPointToPixel(pt.first, pt.second);
             if (pixel.has_value()) {
-                pixel_points.push_back(pixel.value());
+                original_pixel_points.push_back(pixel.value());
             }
         }
 
-        // Draw path as green line
-        if (pixel_points.size() > 1) {
-            for (size_t i = 0; i < pixel_points.size() - 1; ++i) {
-                cv::line(visualization_image, pixel_points[i], pixel_points[i + 1],
-                         cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
+        // Project interpolated points to image
+        for (const auto& pt : interpolated_points) {
+            auto pixel = robotPointToPixel(pt.first, pt.second);
+            if (pixel.has_value()) {
+                interpolated_pixel_points.push_back(pixel.value());
             }
+        }
 
-            // Draw circles at path points
-            for (const auto& pixel : pixel_points) {
-                cv::circle(visualization_image, pixel, 3, cv::Scalar(0, 255, 0), -1);
+        // Draw interpolated path as green line
+        if (interpolated_pixel_points.size() > 1) {
+            for (size_t i = 0; i < interpolated_pixel_points.size() - 1; ++i) {
+                cv::line(visualization_image, interpolated_pixel_points[i],
+                        interpolated_pixel_points[i + 1],
+                        cv::Scalar(0, 255, 0), 1, cv::LINE_AA);
             }
+        }
+
+        // Draw original points as red circles (on top)
+        for (const auto& pixel : original_pixel_points) {
+            cv::circle(visualization_image, pixel, 2, cv::Scalar(0, 0, 255), -1);
+        }
+
+        // Draw small green circles at interpolated points (every 10th point)
+        for (size_t i = 0; i < interpolated_pixel_points.size(); i += 10) {
+            cv::circle(visualization_image, interpolated_pixel_points[i],
+                      2, cv::Scalar(0, 255, 0), -1);
         }
 
         // Display visualization

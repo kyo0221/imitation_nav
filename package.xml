@@ -18,6 +18,8 @@
   <depend>image_transport</depend>
   <depend>ament_index_cpp</depend>
   <depend>opencv2</depend>
+  <depend>eigen3_cmake_module</depend>
+  <depend>eigen</depend>
 
   <depend>libtorch</depend>
   <depend>pcl_ros</depend>

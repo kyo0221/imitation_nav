@@ -9,6 +9,7 @@ set(Torch_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libtorch/share/cmake/Torch")
 find_package(Torch REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(PCL REQUIRED)
+find_package(Eigen3 REQUIRED)
 
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
@@ -29,6 +30,7 @@ target_include_directories(imitation_nav PRIVATE
   ${TORCH_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
 )
 
 ament_auto_add_executable(imitation_nav_node
@@ -46,6 +48,7 @@ target_include_directories(imitation_nav_node PRIVATE
   ${TORCH_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
 )
 
 install(DIRECTORY
