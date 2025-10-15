@@ -51,13 +51,13 @@ topo_localizer_(
         std::bind(&ImitationNav::ImitationNavigation, this));
 
     // PointCloudProcessorを初期化
-    double z_min = this->declare_parameter("z_min", -0.5);
-    double z_max = this->declare_parameter("z_max", 0.5);
-    double angle_min_deg = this->declare_parameter("angle_min_deg", -7.5);
-    double angle_max_deg = this->declare_parameter("angle_max_deg", 7.5);
-    double obstacle_distance_threshold = this->declare_parameter("obstacle_distance_threshold", 2.0);
-    double angle_increment_deg = this->declare_parameter("angle_increment_deg", 1.0);
-    double range_max = this->declare_parameter("range_max", 10.0);
+    double z_min = this->get_parameter_or("z_min", -0.5);
+    double z_max = this->get_parameter_or("z_max", 0.5);
+    double angle_min_deg = this->get_parameter_or("angle_min_deg", -0.1);
+    double angle_max_deg = this->get_parameter_or("angle_max_deg", 0.1);
+    double obstacle_distance_threshold = this->get_parameter_or("obstacle_distance_threshold", 2.0);
+    double angle_increment_deg = this->get_parameter_or("angle_increment_deg", 1.0);
+    double range_max = this->get_parameter_or("range_max", 10.0);
 
     pointcloud_processor_ = std::make_shared<imitation_nav::PointCloudProcessor>(
         z_min, z_max, angle_min_deg, angle_max_deg,
@@ -65,10 +65,10 @@ topo_localizer_(
     );
 
     // PurePursuitパラメータの初期化
-    lookahead_distance_ = this->declare_parameter("lookahead_distance", 1.0);
-    target_linear_velocity_ = this->declare_parameter("target_linear_velocity", 0.5);
-    max_angular_velocity_ = this->declare_parameter("max_angular_velocity", 1.0);
-    goal_tolerance_ = this->declare_parameter("goal_tolerance", 0.3);
+    lookahead_distance_ = this->get_parameter_or("lookahead_distance", 1.0);
+    target_linear_velocity_ = this->get_parameter_or("target_linear_velocity", 0.5);
+    max_angular_velocity_ = this->get_parameter_or("max_angular_velocity", 1.0);
+    goal_tolerance_ = this->get_parameter_or("goal_tolerance", 0.3);
 
     try {
         std::string package_share = ament_index_cpp::get_package_share_directory("imitation_nav");
