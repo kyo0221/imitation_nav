@@ -48,6 +48,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr laserscan_pub_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr autonomous_flag_pub_;
 
   rclcpp::TimerBase::SharedPtr timer_;
 
@@ -76,6 +77,12 @@ private:
 
   imitation_nav::TopoLocalizer topo_localizer_;
   std::shared_ptr<imitation_nav::PointCloudProcessor> pointcloud_processor_;
+
+  // stop履歴管理
+  std::set<int> stopped_node_ids_;
+
+  // 前後10ID範囲にstopがあるかチェック
+  bool isNearStoppedNode(int current_node_id) const;
 };
 
 }  // namespace imitation_nav

@@ -36,6 +36,7 @@ topo_localizer_(
 
     cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
     laserscan_pub_ = this->create_publisher<sensor_msgs::msg::LaserScan>("/scan", 10);
+    autonomous_flag_pub_ = this->create_publisher<std_msgs::msg::Bool>("/autonomous", 10);
 
     timer_ = this->create_wall_timer(std::chrono::milliseconds(interval_ms),
         std::bind(&ImitationNav::ImitationNavigation, this));
@@ -137,6 +138,38 @@ void ImitationNav::ImitationNavigation()
 
         int node_id_ = topo_localizer_.inferNode(topomap_img);
         std::string action = topo_localizer_.getNodeAction(node_id_);
+
+        // 前後10ID範囲にstop履歴がある場合、actionをroadsideに上書き
+        if (action == "stop" && isNearStoppedNode(node_id_)) {
+            RCLCPP_INFO(this->get_logger(),
+                "Node %d has stop action but is near previous stop location. Treating as roadside.", node_id_);
+            action = "roadside";
+        }
+
+        // stopアクションの処理
+        if (action == "stop") {
+            RCLCPP_WARN(this->get_logger(), "Stop action detected at node %d. Stopping navigation.", node_id_);
+
+            // stop履歴に追加
+            stopped_node_ids_.insert(node_id_);
+
+            // autonomous_flag_をfalseにして停止
+            autonomous_flag_ = false;
+
+            // 外部にautonomous_flag_の変更を通知
+            auto flag_msg = std_msgs::msg::Bool();
+            flag_msg.data = false;
+            autonomous_flag_pub_->publish(flag_msg);
+
+            // 速度を0にして停止
+            geometry_msgs::msg::Twist stop_cmd;
+            stop_cmd.linear.x = 0.0;
+            stop_cmd.angular.z = 0.0;
+            cmd_pub_->publish(stop_cmd);
+
+            return;
+        }
+
         int command_idx = 0;
 
         RCLCPP_INFO(this->get_logger(), "current node id : %d, action command : %s", node_id_, action.c_str());
@@ -224,6 +257,16 @@ void ImitationNav::ImitationNavigation()
     } catch (const c10::Error &e) {
         RCLCPP_ERROR(this->get_logger(), "TorchScript inference error: %s", e.what());
     }
+}
+
+bool ImitationNav::isNearStoppedNode(int current_node_id) const {
+    for (int stopped_id : stopped_node_ids_) {
+        int diff = std::abs(current_node_id - stopped_id);
+        if (diff <= 10) {
+            return true;
+        }
+    }
+    return false;
 }
 
 }  // namespace imitation_nav
