@@ -31,6 +31,12 @@ public:
   explicit ImitationNav(const std::string& name_space, const rclcpp::NodeOptions& options = rclcpp::NodeOptions());
 
 private:
+  enum class NavigationState {
+    NORMAL,
+    STOPPED,
+    RECOVERY
+  };
+
   void autonomousFlagCallback(const std_msgs::msg::Bool::SharedPtr msg);
   void ImageCallback(const sensor_msgs::msg::Image::SharedPtr msg);
   void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
@@ -62,6 +68,11 @@ private:
   bool autonomous_flag_=false;
   bool init_flag_=true;
   double collision_gain_=1.0;
+
+  NavigationState nav_state_ = NavigationState::NORMAL;
+  rclcpp::Time stopped_time_;
+  double recovery_timeout_;
+  double recovery_angular_gain_;
 
   imitation_nav::TopoLocalizer topo_localizer_;
   std::shared_ptr<imitation_nav::PointCloudProcessor> pointcloud_processor_;

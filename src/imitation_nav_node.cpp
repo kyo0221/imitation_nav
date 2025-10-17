@@ -56,6 +56,10 @@ topo_localizer_(
     double angle_increment_deg = this->declare_parameter("angle_increment_deg", 1.0);
     double range_max = this->declare_parameter("range_max", 10.0);
 
+    // recovery パラメータ
+    recovery_timeout_ = this->declare_parameter("recovery_timeout", 10.0);
+    recovery_angular_gain_ = this->declare_parameter("recovery_angular_gain", 0.3);
+
     pointcloud_processor_ = std::make_shared<imitation_nav::PointCloudProcessor>(
         z_min, z_max,
         collision_zone_stop, collision_zone_slow2, collision_zone_slow1,
@@ -164,16 +168,55 @@ void ImitationNav::ImitationNavigation()
         double predicted_angular = output.item<float>();
         predicted_angular = std::clamp(predicted_angular, -angular_max_, angular_max_);
 
+        // 状態遷移ロジック
+        if (collision_gain_ == 0.0) {
+            if (nav_state_ == NavigationState::NORMAL) {
+                // 停止検出 → STOPPED状態へ
+                nav_state_ = NavigationState::STOPPED;
+                stopped_time_ = this->now();
+                RCLCPP_WARN(this->get_logger(), "Collision detected! Entered STOPPED state");
+            }
+            else if (nav_state_ == NavigationState::STOPPED) {
+                // 停止時間チェック
+                double elapsed = (this->now() - stopped_time_).seconds();
+                if (elapsed >= recovery_timeout_) {
+                    nav_state_ = NavigationState::RECOVERY;
+                    RCLCPP_WARN(this->get_logger(),
+                        "Timeout (%.1fs)! Entering RECOVERY mode", elapsed);
+                }
+            }
+        } else {
+            // collision_gain回復 → NORMAL状態へ
+            if (nav_state_ != NavigationState::NORMAL) {
+                RCLCPP_INFO(this->get_logger(), "Collision cleared! Returning to NORMAL");
+                nav_state_ = NavigationState::NORMAL;
+            }
+        }
+
+        // 速度指令生成
         geometry_msgs::msg::Twist cmd_msg;
+        switch (nav_state_) {
+            case NavigationState::NORMAL:
+                cmd_msg.linear.x = linear_max_ * collision_gain_;
+                cmd_msg.angular.z = predicted_angular * collision_gain_;
+                if (collision_gain_ < 1.0) {
+                    RCLCPP_WARN(this->get_logger(),
+                        "Collision zone detected! Applying gain: %.2f (linear: %.2f, angular: %.2f)",
+                        collision_gain_, cmd_msg.linear.x, cmd_msg.angular.z);
+                }
+                break;
 
-        // collision gainを適用して速度を調整
-        cmd_msg.linear.x = linear_max_ * collision_gain_;
-        cmd_msg.angular.z = predicted_angular * collision_gain_;
+            case NavigationState::STOPPED:
+                cmd_msg.linear.x = 0.0;
+                cmd_msg.angular.z = 0.0;
+                break;
 
-        if (collision_gain_ < 1.0) {
-            RCLCPP_WARN(this->get_logger(),
-                "Collision zone detected! Applying gain: %.2f (linear: %.2f, angular: %.2f)",
-                collision_gain_, cmd_msg.linear.x, cmd_msg.angular.z);
+            case NavigationState::RECOVERY:
+                cmd_msg.linear.x = 0.0;  // 並進速度0
+                cmd_msg.angular.z = predicted_angular * recovery_angular_gain_;  // 低速旋回
+                RCLCPP_WARN(this->get_logger(),
+                    "RECOVERY: rotating with angular=%.2f", cmd_msg.angular.z);
+                break;
         }
 
         cmd_pub_->publish(cmd_msg);
