@@ -61,7 +61,7 @@ private:
 
   bool autonomous_flag_=false;
   bool init_flag_=true;
-  bool obstacle_detected_=false;
+  double collision_gain_=1.0;
 
   imitation_nav::TopoLocalizer topo_localizer_;
   std::shared_ptr<imitation_nav::PointCloudProcessor> pointcloud_processor_;

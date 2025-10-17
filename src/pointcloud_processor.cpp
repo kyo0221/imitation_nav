@@ -9,16 +9,24 @@ namespace imitation_nav
 PointCloudProcessor::PointCloudProcessor(
     double z_min,
     double z_max,
-    double angle_min_deg,
-    double angle_max_deg,
-    double obstacle_distance_threshold,
+    double collision_zone_stop,
+    double collision_zone_slow2,
+    double collision_zone_slow1,
+    double collision_gain_stop,
+    double collision_gain_slow2,
+    double collision_gain_slow1,
+    double collision_y_width,
     double angle_increment_deg,
     double range_max)
     : z_min_(z_min),
       z_max_(z_max),
-      angle_min_deg_(angle_min_deg),
-      angle_max_deg_(angle_max_deg),
-      obstacle_distance_threshold_(obstacle_distance_threshold),
+      collision_zone_stop_(collision_zone_stop),
+      collision_zone_slow2_(collision_zone_slow2),
+      collision_zone_slow1_(collision_zone_slow1),
+      collision_gain_stop_(collision_gain_stop),
+      collision_gain_slow2_(collision_gain_slow2),
+      collision_gain_slow1_(collision_gain_slow1),
+      collision_y_width_(collision_y_width),
       angle_increment_deg_(angle_increment_deg),
       range_max_(range_max)
 {
@@ -31,7 +39,7 @@ sensor_msgs::msg::LaserScan PointCloudProcessor::convertToLaserScan(
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
     pcl::fromROSMsg(*cloud_msg, *cloud);
 
-    // 高さフィルタリング（z軸）
+    // 高さフィルタリング（z軸）- 横幅制限は削除
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered(new pcl::PointCloud<pcl::PointXYZ>);
     pcl::PassThrough<pcl::PointXYZ> pass;
     pass.setInputCloud(cloud);
@@ -90,25 +98,52 @@ sensor_msgs::msg::LaserScan PointCloudProcessor::convertToLaserScan(
     return scan_msg;
 }
 
-bool PointCloudProcessor::detectObstacle(const sensor_msgs::msg::LaserScan& scan)
+double PointCloudProcessor::calculateCollisionGain(const sensor_msgs::msg::LaserScan& scan)
 {
-    double angle_min_check_rad = angle_min_deg_ * M_PI / 180.0;
-    double angle_max_check_rad = angle_max_deg_ * M_PI / 180.0;
+    double min_distance = std::numeric_limits<double>::infinity();
 
     for (size_t i = 0; i < scan.ranges.size(); ++i)
     {
-        double angle = scan.angle_min + i * scan.angle_increment;
+        if (!std::isfinite(scan.ranges[i])) {
+            continue;
+        }
 
-        // 指定角度範囲内かチェック
-        if (angle >= angle_min_check_rad && angle <= angle_max_check_rad)
-        {
-            if (std::isfinite(scan.ranges[i]) && scan.ranges[i] < obstacle_distance_threshold_) {
-                return true;
-            }
+        double angle = scan.angle_min + i * scan.angle_increment;
+        double range = scan.ranges[i];
+
+        // 極座標からロボット座標系のx, y座標に変換
+        double x = range * std::cos(angle);
+        double y = range * std::sin(angle);
+
+        // y軸（横）の判定範囲チェック: ±0.35m (合計0.7m)
+        if (std::abs(y) > collision_y_width_ / 2.0) {
+            continue;
+        }
+
+        // x軸（前方）の範囲チェック: 0 < x < collision_zone_slow1_
+        if (x > 0.0 && x < collision_zone_slow1_) {
+            min_distance = std::min(min_distance, x);
         }
     }
 
-    return false;
+    // 障害物が検出されなければゲイン1.0（制限なし）
+    if (!std::isfinite(min_distance)) {
+        return 1.0;
+    }
+
+    // 距離に応じたゲインを計算
+    if (min_distance <= collision_zone_stop_) {
+        return collision_gain_stop_;  // 1m以内: gain 0.0
+    }
+    else if (min_distance <= collision_zone_slow2_) {
+        return collision_gain_slow2_;  // 1-2m: gain 0.2
+    }
+    else if (min_distance <= collision_zone_slow1_) {
+        return collision_gain_slow1_;  // 2-3m: gain 0.5
+    }
+    else {
+        return 1.0;  // 3m以上: gain 1.0（制限なし）
+    }
 }
 
 }  // namespace imitation_nav

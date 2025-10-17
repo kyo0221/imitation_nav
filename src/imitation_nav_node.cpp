@@ -43,15 +43,24 @@ topo_localizer_(
     // PointCloudProcessorを初期化
     double z_min = this->declare_parameter("z_min", -0.5);
     double z_max = this->declare_parameter("z_max", 0.5);
-    double angle_min_deg = this->declare_parameter("angle_min_deg", -7.5);
-    double angle_max_deg = this->declare_parameter("angle_max_deg", 7.5);
-    double obstacle_distance_threshold = this->declare_parameter("obstacle_distance_threshold", 2.0);
+
+    // collision monitor パラメータ
+    double collision_zone_stop = this->declare_parameter("collision_zone_stop", 1.0);
+    double collision_zone_slow2 = this->declare_parameter("collision_zone_slow2", 2.0);
+    double collision_zone_slow1 = this->declare_parameter("collision_zone_slow1", 3.0);
+    double collision_gain_stop = this->declare_parameter("collision_gain_stop", 0.0);
+    double collision_gain_slow2 = this->declare_parameter("collision_gain_slow2", 0.2);
+    double collision_gain_slow1 = this->declare_parameter("collision_gain_slow1", 0.5);
+    double collision_y_width = this->declare_parameter("collision_y_width", 0.7);
+
     double angle_increment_deg = this->declare_parameter("angle_increment_deg", 1.0);
     double range_max = this->declare_parameter("range_max", 10.0);
 
     pointcloud_processor_ = std::make_shared<imitation_nav::PointCloudProcessor>(
-        z_min, z_max, angle_min_deg, angle_max_deg,
-        obstacle_distance_threshold, angle_increment_deg, range_max
+        z_min, z_max,
+        collision_zone_stop, collision_zone_slow2, collision_zone_slow1,
+        collision_gain_stop, collision_gain_slow2, collision_gain_slow1,
+        collision_y_width, angle_increment_deg, range_max
     );
 
     try {
@@ -100,8 +109,8 @@ void ImitationNav::pointCloudCallback(const sensor_msgs::msg::PointCloud2::Share
     // LaserScanをパブリッシュ
     laserscan_pub_->publish(scan_msg);
 
-    // 障害物検出
-    obstacle_detected_ = pointcloud_processor_->detectObstacle(scan_msg);
+    // collision gainを計算
+    collision_gain_ = pointcloud_processor_->calculateCollisionGain(scan_msg);
 }
 
 void ImitationNav::ImitationNavigation()
@@ -154,14 +163,14 @@ void ImitationNav::ImitationNavigation()
 
         geometry_msgs::msg::Twist cmd_msg;
 
-        // 障害物が検出された場合は速度を0にする
-        if (obstacle_detected_) {
-            cmd_msg.linear.x = 0.0;
-            cmd_msg.angular.z = 0.0;
-            RCLCPP_WARN(this->get_logger(), "Obstacle detected! Stopping robot.");
-        } else {
-            cmd_msg.linear.x = linear_max_;
-            cmd_msg.angular.z = predicted_angular;
+        // collision gainを適用して速度を調整
+        cmd_msg.linear.x = linear_max_ * collision_gain_;
+        cmd_msg.angular.z = predicted_angular * collision_gain_;
+
+        if (collision_gain_ < 1.0) {
+            RCLCPP_WARN(this->get_logger(),
+                "Collision zone detected! Applying gain: %.2f (linear: %.2f, angular: %.2f)",
+                collision_gain_, cmd_msg.linear.x, cmd_msg.angular.z);
         }
 
         cmd_pub_->publish(cmd_msg);

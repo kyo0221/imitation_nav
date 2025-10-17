@@ -17,9 +17,13 @@ public:
   PointCloudProcessor(
     double z_min,
     double z_max,
-    double angle_min_deg,
-    double angle_max_deg,
-    double obstacle_distance_threshold,
+    double collision_zone_stop,
+    double collision_zone_slow2,
+    double collision_zone_slow1,
+    double collision_gain_stop,
+    double collision_gain_slow2,
+    double collision_gain_slow1,
+    double collision_y_width,
     double angle_increment_deg = 1.0,
     double range_max = 10.0
   );
@@ -27,15 +31,19 @@ public:
   // PointCloud2をLaserScanに変換
   sensor_msgs::msg::LaserScan convertToLaserScan(const sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg);
 
-  // 障害物検出（指定範囲内の最小距離が閾値以下かチェック）
-  bool detectObstacle(const sensor_msgs::msg::LaserScan& scan);
+  // collision monitorによる速度ゲイン計算
+  double calculateCollisionGain(const sensor_msgs::msg::LaserScan& scan);
 
 private:
   double z_min_;
   double z_max_;
-  double angle_min_deg_;
-  double angle_max_deg_;
-  double obstacle_distance_threshold_;
+  double collision_zone_stop_;
+  double collision_zone_slow2_;
+  double collision_zone_slow1_;
+  double collision_gain_stop_;
+  double collision_gain_slow2_;
+  double collision_gain_slow1_;
+  double collision_y_width_;
   double angle_increment_deg_;
   double range_max_;
 };
