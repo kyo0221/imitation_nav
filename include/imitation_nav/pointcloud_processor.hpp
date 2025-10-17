@@ -2,6 +2,7 @@
 
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
+#include <opencv2/opencv.hpp>
 
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -33,6 +34,9 @@ public:
 
   // collision monitorによる速度ゲイン計算
   double calculateCollisionGain(const sensor_msgs::msg::LaserScan& scan);
+
+  // collision monitor可視化
+  void visualizeCollisionMonitor(const sensor_msgs::msg::LaserScan& scan, double current_gain);
 
 private:
   double z_min_;

@@ -146,4 +146,105 @@ double PointCloudProcessor::calculateCollisionGain(const sensor_msgs::msg::Laser
     }
 }
 
+void PointCloudProcessor::visualizeCollisionMonitor(const sensor_msgs::msg::LaserScan& scan, double current_gain)
+{
+    // 画像サイズ: x軸-1~9m (10m), y軸3~-3m (6m), 100 pixels/m
+    const int img_height = 1000;  // x軸方向
+    const int img_width = 600;    // y軸方向
+    const double scale = 100.0;   // pixels per meter
+    const double x_min = -1.0;
+    const double x_max = 9.0;
+    const double y_min = -3.0;
+    const double y_max = 3.0;
+
+    // 背景画像（黒）
+    cv::Mat img = cv::Mat::zeros(img_height, img_width, CV_8UC3);
+
+    // ロボット座標(x, y)からOpenCV座標(col, row)への変換
+    auto toImageCoords = [&](double x, double y) -> cv::Point {
+        int col = static_cast<int>((y_max - y) * scale);
+        int row = static_cast<int>((x_max - x) * scale);
+        return cv::Point(col, row);
+    };
+
+    // グリッド線を描画（1mごと）
+    cv::Scalar grid_color(50, 50, 50);
+    for (int x = static_cast<int>(x_min); x <= static_cast<int>(x_max); ++x) {
+        cv::Point p1 = toImageCoords(x, y_max);
+        cv::Point p2 = toImageCoords(x, y_min);
+        cv::line(img, p1, p2, grid_color, 1);
+    }
+    for (int y = static_cast<int>(y_min); y <= static_cast<int>(y_max); ++y) {
+        cv::Point p1 = toImageCoords(x_min, y);
+        cv::Point p2 = toImageCoords(x_max, y);
+        cv::line(img, p1, p2, grid_color, 1);
+    }
+
+    // collision zoneエリアを描画（半透明矩形）
+    cv::Mat overlay = img.clone();
+
+    double y_half_width = collision_y_width_ / 2.0;
+
+    // slow1エリア (2-3m): 黄緑色 (BGR: 0, 255, 0)
+    if (collision_zone_slow1_ > collision_zone_slow2_) {
+        cv::Point p1 = toImageCoords(collision_zone_slow1_, y_half_width);
+        cv::Point p2 = toImageCoords(collision_zone_slow2_, -y_half_width);
+        cv::rectangle(overlay, p1, p2, cv::Scalar(0, 255, 0), -1);
+    }
+
+    // slow2エリア (1-2m): 黄色 (BGR: 0, 255, 255)
+    if (collision_zone_slow2_ > collision_zone_stop_) {
+        cv::Point p1 = toImageCoords(collision_zone_slow2_, y_half_width);
+        cv::Point p2 = toImageCoords(collision_zone_stop_, -y_half_width);
+        cv::rectangle(overlay, p1, p2, cv::Scalar(0, 255, 255), -1);
+    }
+
+    // stopエリア (0-1m): 赤色 (BGR: 0, 0, 255)
+    if (collision_zone_stop_ > 0.0) {
+        cv::Point p1 = toImageCoords(collision_zone_stop_, y_half_width);
+        cv::Point p2 = toImageCoords(0.0, -y_half_width);
+        cv::rectangle(overlay, p1, p2, cv::Scalar(0, 0, 255), -1);
+    }
+
+    // エリアに透明度を適用（反応時: 0.6、非反応時: 0.3）
+    double alpha = (current_gain < 1.0) ? 0.6 : 0.3;
+    cv::addWeighted(overlay, alpha, img, 1.0 - alpha, 0, img);
+
+    // 点群を描画（赤い点）
+    for (size_t i = 0; i < scan.ranges.size(); ++i) {
+        if (!std::isfinite(scan.ranges[i])) {
+            continue;
+        }
+
+        double angle = scan.angle_min + i * scan.angle_increment;
+        double range = scan.ranges[i];
+
+        // 極座標からロボット座標系のx, y座標に変換
+        double x = range * std::cos(angle);
+        double y = range * std::sin(angle);
+
+        // 表示範囲内かチェック
+        if (x < x_min || x > x_max || y < y_min || y > y_max) {
+            continue;
+        }
+
+        cv::Point pt = toImageCoords(x, y);
+        cv::circle(img, pt, 2, cv::Scalar(0, 0, 255), -1);  // 赤色の点
+    }
+
+    // ロボットを描画（青い円）
+    cv::Point robot_pos = toImageCoords(0.0, 0.0);
+    cv::circle(img, robot_pos, 10, cv::Scalar(255, 0, 0), -1);  // 青色の円
+    cv::circle(img, robot_pos, 10, cv::Scalar(255, 255, 255), 2);  // 白い縁
+
+    // gainの情報を表示
+    std::stringstream ss;
+    ss << "Collision Gain: " << std::fixed << std::setprecision(2) << current_gain;
+    cv::putText(img, ss.str(), cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 255), 2);
+
+    // 画像を表示
+    cv::imshow("Collision Monitor", img);
+    cv::waitKey(1);
+}
+
 }  // namespace imitation_nav

@@ -111,6 +111,9 @@ void ImitationNav::pointCloudCallback(const sensor_msgs::msg::PointCloud2::Share
 
     // collision gainを計算
     collision_gain_ = pointcloud_processor_->calculateCollisionGain(scan_msg);
+
+    // collision monitorを可視化
+    pointcloud_processor_->visualizeCollisionMonitor(scan_msg, collision_gain_);
 }
 
 void ImitationNav::ImitationNavigation()
