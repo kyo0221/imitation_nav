@@ -2,11 +2,12 @@ imitation_nav_node:
   ros__parameters:
     interval_ms: 100
     localization_interval_ms: 500
-    model_name: finetuned_model.pt
+    model_name: allmerge_tsukuba2.pt
 
     max_linear_vel: 0.8
     max_angular_vel: 1.57
     visualize_flag: false
-    window_lower: -2
-    window_upper: 5
-    use_observation_based_init: true
+    window_lower: -20
+    window_upper: 30
+    use_observation_based_init: false
+    enable_stop_deceleration: true

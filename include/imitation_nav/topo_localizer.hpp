@@ -26,9 +26,12 @@ public:
     int inferNode(const cv::Mat& input_image);
     
     std::string getNodeAction(int node_id) const;
-    
+
     float getMaxBelief() const;
     float getBeliefEntropy() const;
+
+    // トポロジカルマップ全体を取得
+    const std::vector<TopoNode>& getMap() const;
 
 private:
     // 内部メソッド

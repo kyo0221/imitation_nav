@@ -35,6 +35,9 @@ public:
   // collision monitorによる速度ゲイン計算
   double calculateCollisionGain(const sensor_msgs::msg::LaserScan& scan);
 
+  // 停止ゾーン内の障害物のy座標バイアスを取得（左が正、右が負）
+  double getObstacleYBias(const sensor_msgs::msg::LaserScan& scan);
+
   // collision monitor可視化
   void visualizeCollisionMonitor(const sensor_msgs::msg::LaserScan& scan, double current_gain);
 

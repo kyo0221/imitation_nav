@@ -55,6 +55,7 @@ private:
   torch::jit::script::Module model_;
 
   cv::Mat latest_image_;
+  sensor_msgs::msg::LaserScan latest_scan_;
 
   const int interval_ms;
   const int localization_interval_ms;
@@ -65,6 +66,7 @@ private:
   const int window_lower_;
   const int window_upper_;
   const bool use_observation_based_init_;
+  const bool enable_stop_deceleration_;
 
   bool autonomous_flag_=false;
   bool init_flag_=true;
@@ -74,6 +76,7 @@ private:
   rclcpp::Time stopped_time_;
   double recovery_timeout_;
   double recovery_angular_gain_;
+  double recovery_direction_ = 0.0;  // リカバリー時の回転方向を保存
 
   imitation_nav::TopoLocalizer topo_localizer_;
   std::shared_ptr<imitation_nav::PointCloudProcessor> pointcloud_processor_;
@@ -81,8 +84,14 @@ private:
   // stop履歴管理
   std::set<int> stopped_node_ids_;
 
+  // stopアクション付きノードのIDリスト
+  std::vector<int> stop_node_ids_;
+
   // 前後10ID範囲にstopがあるかチェック
   bool isNearStoppedNode(int current_node_id) const;
+
+  // stopノードの10個手前にいるかチェック
+  bool isApproachingStopNode(int current_node_id) const;
 };
 
 }  // namespace imitation_nav

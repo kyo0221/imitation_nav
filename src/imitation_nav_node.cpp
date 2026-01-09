@@ -19,6 +19,7 @@ visualize_flag_(get_parameter("visualize_flag").as_bool()),
 window_lower_(get_parameter("window_lower").as_int()),
 window_upper_(get_parameter("window_upper").as_int()),
 use_observation_based_init_(get_parameter("use_observation_based_init").as_bool()),
+enable_stop_deceleration_(get_parameter("enable_stop_deceleration").as_bool()),
 topo_localizer_(
     ament_index_cpp::get_package_share_directory("imitation_nav") + "/config/topo_map/topomap.yaml",
     ament_index_cpp::get_package_share_directory("imitation_nav") + "/weights/placenet/placenet.pt",
@@ -58,7 +59,7 @@ topo_localizer_(
     double range_max = this->declare_parameter("range_max", 10.0);
 
     // recovery パラメータ
-    recovery_timeout_ = this->declare_parameter("recovery_timeout", 10.0);
+    recovery_timeout_ = this->declare_parameter("recovery_timeout", 5.0);
     recovery_angular_gain_ = this->declare_parameter("recovery_angular_gain", 0.3);
 
     pointcloud_processor_ = std::make_shared<imitation_nav::PointCloudProcessor>(
@@ -78,6 +79,17 @@ topo_localizer_(
         RCLCPP_INFO(this->get_logger(), "Model loaded from: %s", model_path_.c_str());
     } catch (const c10::Error &e) {
         RCLCPP_ERROR(this->get_logger(), "Failed to load model: %s", e.what());
+    }
+
+    // stopアクション付きノードのIDを収集
+    if (enable_stop_deceleration_) {
+        const auto& map = topo_localizer_.getMap();
+        for (const auto& node : map) {
+            if (node.action == "stop") {
+                stop_node_ids_.push_back(node.id);
+            }
+        }
+        RCLCPP_INFO(this->get_logger(), "Stop deceleration enabled. Found %zu stop nodes.", stop_node_ids_.size());
     }
 }
 
@@ -110,6 +122,9 @@ void ImitationNav::pointCloudCallback(const sensor_msgs::msg::PointCloud2::Share
 {
     // PointCloud2をLaserScanに変換
     sensor_msgs::msg::LaserScan scan_msg = pointcloud_processor_->convertToLaserScan(msg);
+
+    // LaserScanを保存
+    latest_scan_ = scan_msg;
 
     // LaserScanをパブリッシュ
     laserscan_pub_->publish(scan_msg);
@@ -214,8 +229,26 @@ void ImitationNav::ImitationNavigation()
                 double elapsed = (this->now() - stopped_time_).seconds();
                 if (elapsed >= recovery_timeout_) {
                     nav_state_ = NavigationState::RECOVERY;
+
+                    // 停止ゾーン内の障害物のy座標バイアスを取得
+                    double obstacle_y_bias = pointcloud_processor_->getObstacleYBias(latest_scan_);
+
+                    // リカバリー方向を決定（障害物がない方向に旋回）
+                    // y_bias > 0: 左側に障害物 → 右に旋回（負の角速度）
+                    // y_bias < 0: 右側に障害物 → 左に旋回（正の角速度）
+                    // y_bias == 0: デフォルトで右に旋回
+                    const double recovery_angular_vel = 0.5;  // 固定の角速度 [rad/s]
+                    if (obstacle_y_bias > 0.0) {
+                        recovery_direction_ = -recovery_angular_vel;  // 右旋回
+                    } else if (obstacle_y_bias < 0.0) {
+                        recovery_direction_ = recovery_angular_vel;   // 左旋回
+                    } else {
+                        recovery_direction_ = -recovery_angular_vel;  // デフォルトで右旋回
+                    }
+
                     RCLCPP_WARN(this->get_logger(),
-                        "Timeout (%.1fs)! Entering RECOVERY mode", elapsed);
+                        "Timeout (%.1fs)! Entering RECOVERY mode. Obstacle Y bias: %.3f, Recovery direction: %.2f",
+                        elapsed, obstacle_y_bias, recovery_direction_);
                 }
             }
         } else {
@@ -228,14 +261,27 @@ void ImitationNav::ImitationNavigation()
 
         // 速度指令生成
         geometry_msgs::msg::Twist cmd_msg;
+
+        // stopノード接近時の減速ゲインを計算
+        double stop_decel_gain = 1.0;
+        bool approaching_stop = isApproachingStopNode(node_id_);
+        if (approaching_stop) {
+            stop_decel_gain = 0.5;  // 50%に減速
+        }
+
         switch (nav_state_) {
             case NavigationState::NORMAL:
-                cmd_msg.linear.x = linear_max_ * collision_gain_;
+                cmd_msg.linear.x = linear_max_ * collision_gain_ * stop_decel_gain;
                 cmd_msg.angular.z = predicted_angular * collision_gain_;
                 if (collision_gain_ < 1.0) {
                     RCLCPP_WARN(this->get_logger(),
                         "Collision zone detected! Applying gain: %.2f (linear: %.2f, angular: %.2f)",
                         collision_gain_, cmd_msg.linear.x, cmd_msg.angular.z);
+                }
+                if (approaching_stop) {
+                    RCLCPP_INFO(this->get_logger(),
+                        "Approaching stop node! Applying deceleration gain: %.2f (linear: %.2f)",
+                        stop_decel_gain, cmd_msg.linear.x);
                 }
                 break;
 
@@ -246,7 +292,7 @@ void ImitationNav::ImitationNavigation()
 
             case NavigationState::RECOVERY:
                 cmd_msg.linear.x = 0.0;  // 並進速度0
-                cmd_msg.angular.z = predicted_angular * recovery_angular_gain_;  // 低速旋回
+                cmd_msg.angular.z = recovery_direction_;  // 最初に決めた方向で回転し続ける
                 RCLCPP_WARN(this->get_logger(),
                     "RECOVERY: rotating with angular=%.2f", cmd_msg.angular.z);
                 break;
@@ -263,6 +309,20 @@ bool ImitationNav::isNearStoppedNode(int current_node_id) const {
     for (int stopped_id : stopped_node_ids_) {
         int diff = std::abs(current_node_id - stopped_id);
         if (diff <= 10) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ImitationNav::isApproachingStopNode(int current_node_id) const {
+    if (!enable_stop_deceleration_) {
+        return false;
+    }
+
+    // stopノードの10個手前（stop_id - 10からstop_id - 1まで）にいるかチェック
+    for (int stop_id : stop_node_ids_) {
+        if (current_node_id >= stop_id - 10 && current_node_id < stop_id) {
             return true;
         }
     }

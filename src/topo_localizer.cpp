@@ -388,4 +388,8 @@ float TopoLocalizer::getBeliefEntropy() const {
     return entropy;
 }
 
+const std::vector<TopoNode>& TopoLocalizer::getMap() const {
+    return map_;
+}
+
 } // namespace imitation_nav

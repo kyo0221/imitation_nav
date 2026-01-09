@@ -146,6 +146,46 @@ double PointCloudProcessor::calculateCollisionGain(const sensor_msgs::msg::Laser
     }
 }
 
+double PointCloudProcessor::getObstacleYBias(const sensor_msgs::msg::LaserScan& scan)
+{
+    double y_sum = 0.0;
+    int count = 0;
+
+    // 停止ゾーン内の障害物のy座標を集計
+    for (size_t i = 0; i < scan.ranges.size(); ++i)
+    {
+        if (!std::isfinite(scan.ranges[i])) {
+            continue;
+        }
+
+        double angle = scan.angle_min + i * scan.angle_increment;
+        double range = scan.ranges[i];
+
+        // 極座標からロボット座標系のx, y座標に変換
+        double x = range * std::cos(angle);
+        double y = range * std::sin(angle);
+
+        // y軸（横）の判定範囲チェック: ±0.35m (合計0.7m)
+        if (std::abs(y) > collision_y_width_ / 2.0) {
+            continue;
+        }
+
+        // 停止ゾーン内（0 < x < collision_zone_stop_）の点群のみ対象
+        if (x > 0.0 && x < collision_zone_stop_) {
+            y_sum += y;
+            count++;
+        }
+    }
+
+    // 停止ゾーン内に障害物がない場合は0.0を返す
+    if (count == 0) {
+        return 0.0;
+    }
+
+    // y座標の平均値を返す（正：左側に障害物、負：右側に障害物）
+    return y_sum / count;
+}
+
 void PointCloudProcessor::visualizeCollisionMonitor(const sensor_msgs::msg::LaserScan& scan, double current_gain)
 {
     // 画像サイズ: x軸-1~9m (10m), y軸3~-3m (6m), 100 pixels/m
